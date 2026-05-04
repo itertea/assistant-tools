@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import asyncio
+from datetime import UTC
+from datetime import datetime
 from getpass import getpass
 from pathlib import Path
 import subprocess
@@ -10,13 +12,13 @@ import tempfile
 from typing import Any
 
 from telethon import TelegramClient
-from telethon import events
 from telethon import utils
 from telethon.errors import FloodWaitError
 from telethon.errors import PasswordHashInvalidError
 from telethon.errors import PhoneCodeInvalidError
 from telethon.errors import SessionPasswordNeededError
 from telethon.sessions import StringSession
+from telethon.tl.types import InputPeerSelf
 from telethon.tl.types import PeerChannel
 from telethon.tl.types import PeerChat
 from telethon.tl.types import PeerUser
@@ -626,48 +628,63 @@ async def wait_next_message(
     if timeout_seconds <= 0:
         raise _error("invalid_timeout", "timeout_seconds must be greater than 0", exit_code=2)
 
-    async with telegram_client(config, receive_updates=True) as client:
+    started_at: datetime = datetime.now(UTC)
+
+    async with telegram_client(config) as client:
         entity: Any = await _resolve_peer_entity(client, peer)
         me: Any = await client.get_me()
-        input_peer: Any = await client.get_input_entity(entity)
-        loop: asyncio.AbstractEventLoop = asyncio.get_running_loop()
-        waiter: asyncio.Future[Any] = loop.create_future()
-
-        async def _on_message(event: Any) -> None:
-            if waiter.done():
-                return
-            waiter.set_result(event.message)
-
         is_self_chat: bool = bool(
-            me is not None and getattr(entity, "id", None) == getattr(me, "id", None)
+            peer.lower() in {"me", "self"}
+            or isinstance(entity, InputPeerSelf)
+            or (me is not None and getattr(entity, "id", None) == getattr(me, "id", None))
         )
-        builder: events.NewMessage = (
-            events.NewMessage(chats=input_peer)
-            if is_self_chat
-            else events.NewMessage(chats=input_peer, incoming=True)
-        )
-        client.add_event_handler(_on_message, builder)
-        try:
-            message: Any = await asyncio.wait_for(waiter, timeout=timeout_seconds)
-        except TimeoutError as err:
-            raise _error(
-                "timeout",
-                f"Timed out waiting for the next incoming message after {timeout_seconds} seconds",
-                exit_code=4,
-            ) from err
-        finally:
-            client.remove_event_handler(_on_message, builder)
+        latest: Any = await client.get_messages(entity, limit=1)
+        baseline_id: int = 0
+        if latest:
+            first: Any = latest[0] if isinstance(latest, list) else latest[0]
+            baseline_id = int(getattr(first, "id", 0) or 0)
 
-        return _ok(
-            "tg.wait-next",
-            {"message": normalize_message(message, chat_entity=entity, full=full)},
-            {
-                "peer": peer,
-                "timeout_seconds": timeout_seconds,
-                "profile": config.profile,
-                "full": full,
-            },
-        )
+        loop: asyncio.AbstractEventLoop = asyncio.get_running_loop()
+        deadline: float = loop.time() + timeout_seconds
+        while True:
+            remaining: float = deadline - loop.time()
+            if remaining <= 0:
+                raise _error(
+                    "timeout",
+                    f"Timed out waiting for the next incoming message after {timeout_seconds} seconds",
+                    exit_code=4,
+                )
+
+            messages: Any = await client.get_messages(entity, limit=50)
+            candidates: list[Any] = []
+            for message in list(messages or []):
+                message_id: int = int(getattr(message, "id", 0) or 0)
+                message_date: datetime | None = getattr(message, "date", None)
+                is_after_baseline: bool = message_id > baseline_id
+                is_after_start: bool = bool(
+                    message_date is not None and message_date.astimezone(UTC) >= started_at
+                )
+                if not is_after_baseline and not is_after_start:
+                    continue
+                if not is_self_chat and bool(getattr(message, "out", False)):
+                    continue
+                candidates.append(message)
+
+            if candidates:
+                message = min(candidates, key=lambda item: int(getattr(item, "id", 0) or 0))
+                return _ok(
+                    "tg.wait-next",
+                    {"message": normalize_message(message, chat_entity=entity, full=full)},
+                    {
+                        "peer": peer,
+                        "timeout_seconds": timeout_seconds,
+                        "profile": config.profile,
+                        "full": full,
+                        "baseline_message_id": baseline_id,
+                    },
+                )
+
+            await asyncio.sleep(min(1.0, max(0.0, remaining)))
 
 
 async def media_info(

@@ -10,42 +10,36 @@ from assistant_tools.tg import commands
 from assistant_tools.tg.config import ResolvedTgConfig
 
 
+class _FakeMessage:
+    def __init__(self, message_id: int, text: str, *, out: bool = False) -> None:
+        self.id = message_id
+        self.date = None
+        self.sender = None
+        self.text = text
+        self.photo = None
+        self.video = None
+        self.document = None
+        self.audio = None
+        self.voice = None
+        self.grouped_id = None
+        self.reply_to = None
+        self.out = out
+        self.mentioned = False
+        self.noforwards = False
+
+
 class _FakeClient:
     def __init__(self) -> None:
-        self.handler: Any | None = None
-        self.builder: Any | None = None
+        self.calls: int = 0
 
     async def get_me(self) -> Any:
         return SimpleNamespace(id=1)
 
-    async def get_input_entity(self, entity: Any) -> Any:
-        return entity
-
-    def add_event_handler(self, handler: Any, builder: Any) -> None:
-        self.handler = handler
-        self.builder = builder
-        loop = asyncio.get_running_loop()
-        loop.call_soon(asyncio.create_task, handler(SimpleNamespace(message=_FakeMessage())))
-
-    def remove_event_handler(self, handler: Any, builder: Any) -> None:
-        pass
-
-
-class _FakeMessage:
-    id = 123
-    date = None
-    sender = None
-    text = "probe"
-    photo = None
-    video = None
-    document = None
-    audio = None
-    voice = None
-    grouped_id = None
-    reply_to = None
-    out = False
-    mentioned = False
-    noforwards = False
+    async def get_messages(self, entity: Any, limit: int) -> list[_FakeMessage]:
+        self.calls += 1
+        if self.calls == 1:
+            return [_FakeMessage(122, "baseline")]
+        return [_FakeMessage(123, "probe")]
 
 
 def _config() -> ResolvedTgConfig:
@@ -64,13 +58,12 @@ def _config() -> ResolvedTgConfig:
     )
 
 
-async def _run_wait_next(calls: list[bool]) -> None:
+async def _run_wait_next() -> None:
     fake_client = _FakeClient()
     commands_module: Any = commands
 
     @asynccontextmanager
-    async def fake_telegram_client(config: ResolvedTgConfig, *, receive_updates: bool = False):
-        calls.append(receive_updates)
+    async def fake_telegram_client(config: ResolvedTgConfig):
         yield fake_client
 
     async def fake_resolve_peer_entity(client: Any, peer: str) -> Any:
@@ -79,19 +72,18 @@ async def _run_wait_next(calls: list[bool]) -> None:
     original_telegram_client = commands_module.telegram_client
     original_resolve_peer_entity = getattr(commands_module, "_resolve_peer_entity")
     try:
-        commands_module.telegram_client = fake_telegram_client
+        setattr(commands_module, "telegram_client", fake_telegram_client)
         setattr(commands_module, "_resolve_peer_entity", fake_resolve_peer_entity)
         result = await commands.wait_next_message(_config(), "me", 1.0, False)
     finally:
-        commands_module.telegram_client = original_telegram_client
+        setattr(commands_module, "telegram_client", original_telegram_client)
         setattr(commands_module, "_resolve_peer_entity", original_resolve_peer_entity)
 
     assert result.ok is True
     assert result.data is not None
     assert result.data["message"]["message_id"] == 123
+    assert result.data["message"]["text"] == "probe"
 
 
-def test_wait_next_enables_updates() -> None:
-    calls: list[bool] = []
-    asyncio.run(_run_wait_next(calls))
-    assert calls == [True]
+def test_wait_next_polls_for_messages_after_baseline() -> None:
+    asyncio.run(_run_wait_next())
