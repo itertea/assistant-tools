@@ -136,11 +136,18 @@ def build_parser() -> argparse.ArgumentParser:
     video_parser.add_argument("--prompt", default=None, help="Optional spelling/context prompt")
 
     tts_parser = subparsers.add_parser(
-        "tts", help="Local English-only text to speech via KittenTTS"
+        "tts", help="Local text to speech via Supertonic or KittenTTS"
     )
-    tts_parser.add_argument("text", help="English text to synthesize")
+    tts_parser.add_argument("text", help="Text to synthesize")
+    tts_parser.add_argument(
+        "--backend",
+        choices=["supertonic", "kittentts", "kitten"],
+        default=None,
+        help="TTS backend override",
+    )
     tts_parser.add_argument("--voice", default=None, help="Voice name override")
-    tts_parser.add_argument("--model", default=None, help="KittenTTS model override")
+    tts_parser.add_argument("--model", default=None, help="TTS model override")
+    tts_parser.add_argument("--language", default=None, help="Language code override, e.g. en or ru")
     tts_parser.add_argument("--speed", type=float, default=None, help="Speech speed")
     tts_parser.add_argument(
         "--clean-text",
@@ -251,8 +258,10 @@ def build_parser() -> argparse.ArgumentParser:
     tg_speak.add_argument("text", help="English text to synthesize and send")
     tg_speak.add_argument("--caption", default=None, help="Optional caption")
     tg_speak.add_argument("--reply-to", type=int, default=None, help="Reply target message id")
+    tg_speak.add_argument("--backend", choices=["supertonic", "kittentts", "kitten"], default=None)
     tg_speak.add_argument("--voice", default=None, help="Voice name override")
-    tg_speak.add_argument("--model", default=None, help="KittenTTS model override")
+    tg_speak.add_argument("--model", default=None, help="TTS model override")
+    tg_speak.add_argument("--language", default=None, help="Language code override, e.g. en or ru")
     tg_speak.add_argument("--speed", type=float, default=None, help="Speech speed")
     tg_speak.add_argument(
         "--clean-text",
@@ -559,8 +568,10 @@ def run_video(
 def run_tts(
     args: argparse.Namespace, config: AppConfig, verbose: bool, config_path: Path | None
 ) -> CommandResult:
+    backend: str = args.backend or config.tts.backend
     model: str = args.model or config.tts.model
     voice: str = args.voice or config.tts.voice
+    language: str = args.language if args.language is not None else config.tts.language
     speed: float = float(args.speed) if args.speed is not None else config.tts.speed
     clean_text: bool = args.clean_text if args.clean_text is not None else config.tts.clean_text
     play: bool = args.play if args.play is not None else config.tts.autoplay
@@ -579,17 +590,19 @@ def run_tts(
         save=save,
         play=play,
         volume=volume,
+        backend=backend,
+        language=language,
     )
     return CommandResult(
         ok=True,
         command="tts",
-        provider="kittentts",
+        provider=str(payload.get("backend") or backend),
         data=payload,
         error=None,
         meta={
             **_meta("tts", config, config_path, verbose),
             "text_chars": len(str(args.text)),
-            "english_only": True,
+            "backend": str(payload.get("backend") or backend),
             "save": save,
             "play": play,
         },
@@ -603,8 +616,10 @@ def run_tg_speak(
     verbose: bool,
     config_path: Path | None,
 ) -> CommandResult:
+    backend: str = args.backend or config.tts.backend
     model: str = args.model or config.tts.model
     voice: str = args.voice or config.tts.voice
+    language: str = args.language if args.language is not None else config.tts.language
     speed: float = float(args.speed) if args.speed is not None else config.tts.speed
     clean_text: bool = args.clean_text if args.clean_text is not None else config.tts.clean_text
 
@@ -619,11 +634,13 @@ def run_tg_speak(
         save=True,
         play=False,
         volume=config.tts.volume,
+        backend=backend,
+        language=language,
     )
     generated_path: str | None = payload.get("path")
     if not generated_path:
         raise AssistantToolsError(
-            "KittenTTS did not return an output file path",
+            "TTS did not return an output file path",
             error_type="tts_write_error",
             exit_code=5,
         )
@@ -644,8 +661,10 @@ def run_tg_speak(
     assert voice_result.data is not None
     data: dict[str, Any] = dict(voice_result.data)
     data["tts"] = {
+        "backend": payload.get("backend") or backend,
         "voice": voice,
         "model": model,
+        "language": payload.get("language") or language,
         "speed": speed,
         "clean_text": clean_text,
         "text_chars": len(str(args.text)),
@@ -655,8 +674,10 @@ def run_tg_speak(
         {
             **_meta("tg.speak", config, config_path, verbose),
             "text_chars": len(str(args.text)),
+            "backend": payload.get("backend") or backend,
             "voice": voice,
             "model": model,
+            "language": payload.get("language") or language,
             "speed": speed,
             "clean_text": clean_text,
         }
@@ -664,7 +685,7 @@ def run_tg_speak(
     return CommandResult(
         ok=voice_result.ok,
         command="tg.speak",
-        provider="kittentts+telethon",
+        provider=f"{payload.get('backend') or backend}+telethon",
         data=data,
         error=voice_result.error,
         meta=meta,

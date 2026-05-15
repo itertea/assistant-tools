@@ -38,6 +38,7 @@ dependencies = [
     { name = "python-socks" },
     { name = "socksio" },
     { name = "soundfile" },
+    { name = "supertonic" },
     { name = "telethon" },
 ]
 
@@ -61,6 +62,7 @@ requires-dist = [
     { name = "python-socks", extras = ["asyncio"], specifier = ">=2.8.1" },
     { name = "socksio", specifier = ">=1.0.0" },
     { name = "soundfile", specifier = ">=0.13.1" },
+    { name = "supertonic", specifier = ">=1.2.3" },
     { name = "telethon", specifier = ">=1.43.0" },
 ]
 provides-extras = ["kitten-tts"]
@@ -1281,6 +1283,21 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/57/5e/70bdd9579b35003a489fc850b5047beeda26328053ebadc1fb60f320f7db/soundfile-0.13.1-py2.py3-none-manylinux_2_28_x86_64.whl", hash = "sha256:03267c4e493315294834a0870f31dbb3b28a95561b80b134f0bd3cf2d5f0e618", size = 1313646, upload-time = "2025-01-25T09:16:54.872Z" },
     { url = "https://files.pythonhosted.org/packages/fe/df/8c11dc4dfceda14e3003bb81a0d0edcaaf0796dd7b4f826ea3e532146bba/soundfile-0.13.1-py2.py3-none-win32.whl", hash = "sha256:c734564fab7c5ddf8e9be5bf70bab68042cd17e9c214c06e365e20d64f9a69d5", size = 899881, upload-time = "2025-01-25T09:16:56.663Z" },
     { url = "https://files.pythonhosted.org/packages/14/e9/6b761de83277f2f02ded7e7ea6f07828ec78e4b229b80e4ca55dd205b9dc/soundfile-0.13.1-py2.py3-none-win_amd64.whl", hash = "sha256:1e70a05a0626524a69e9f0f4dd2ec174b4e9567f4d8b6c11d38b5c289be36ee9", size = 1019162, upload-time = "2025-01-25T09:16:59.573Z" },
+]
+
+[[package]]
+name = "supertonic"
+version = "1.2.3"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "huggingface-hub" },
+    { name = "numpy" },
+    { name = "onnxruntime" },
+    { name = "soundfile" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/2a/6f/393e535f267823e886c70bee71ab0dee5860f8553646d65f8eae068531ac/supertonic-1.2.3.tar.gz", hash = "sha256:25ba56cefd0c9df83128bb48922963690dabc6b94eccf972bdb7a2b628d90b17", size = 37420, upload-time = "2026-05-15T06:51:05.951Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/1d/c2/afadb8007dce5a3528f1eaf447abaa21ebdae147f31a504d9c74504dcb88/supertonic-1.2.3-py3-none-any.whl", hash = "sha256:69968873605d93372eee89b2dd80c9a6c4fe6328c048fe84fb1e157cfa93337f", size = 34259, upload-time = "2026-05-15T06:51:04.82Z" },
 ]
 
 [[package]]

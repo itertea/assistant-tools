@@ -47,9 +47,11 @@ class VttConfig:
 
 @dataclass(slots=True)
 class TtsConfig:
-    model: str = "KittenML/kitten-tts-micro-0.8"
-    voice: str = "Rosie"
-    speed: float = 1.0
+    backend: str = "supertonic"
+    model: str = "supertonic-3"
+    voice: str = "F1"
+    language: str = ""
+    speed: float = 1.05
     clean_text: bool = False
     autoplay: bool = True
     volume: int = 45000

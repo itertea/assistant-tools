@@ -39,6 +39,25 @@
             doCheck = false;
           };
 
+          supertonicPkg = py.buildPythonPackage rec {
+            pname = "supertonic";
+            version = "1.2.3";
+            pyproject = true;
+            src = pkgs.fetchPypi {
+              inherit pname version;
+              hash = "sha256-JbpWzv0MnfgxKLtIkiljaQ2rxrlOzPlyvbeitijZCxc=";
+            };
+            build-system = with py; [ setuptools wheel ];
+            propagatedBuildInputs = with py; [
+              huggingface-hub
+              numpy
+              onnxruntime
+              soundfile
+            ];
+            pythonImportsCheck = [ "supertonic" ];
+            doCheck = false;
+          };
+
           kittenttsPkg = py.buildPythonPackage rec {
             pname = "kittentts";
             version = "0.8.1";
@@ -85,6 +104,7 @@
             pythonSocks281
             telethon1431
             kittenttsPkg
+            supertonicPkg
           ];
           pythonImportsCheck = [ "assistant_tools" ];
           meta.mainProgram = "assistant-tools";
