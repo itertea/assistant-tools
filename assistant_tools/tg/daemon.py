@@ -179,13 +179,15 @@ async def handle_client(reader: asyncio.StreamReader, writer: asyncio.StreamWrit
             if responses:
                 # Auto-react to show user the agent read the message
                 from telethon.tl.functions.messages import SendReactionRequest
-                from telethon.tl.types import ReactionEmoji
+                from telethon.tl.types import ReactionEmoji, InputPeerUser
+                me_entity = await client.get_me()
+                react_peer = InputPeerUser(user_id=me_entity.id, access_hash=me_entity.access_hash) if isinstance(entity, InputPeerSelf) else entity
                 for resp in responses:
                     try:
                         mid = resp.get("message_id")
                         if mid:
                             await client(SendReactionRequest(
-                                peer=entity,
+                                peer=react_peer,
                                 msg_id=mid,
                                 reaction=[ReactionEmoji(emoticon="👀")],
                             ))
@@ -211,13 +213,15 @@ async def handle_client(reader: asyncio.StreamReader, writer: asyncio.StreamWrit
 
                     # Auto-react
                     from telethon.tl.functions.messages import SendReactionRequest
-                    from telethon.tl.types import ReactionEmoji
+                    from telethon.tl.types import ReactionEmoji, InputPeerUser
+                    me_entity2 = await client.get_me()
+                    react_peer2 = InputPeerUser(user_id=me_entity2.id, access_hash=me_entity2.access_hash) if isinstance(entity, InputPeerSelf) else entity
                     for resp in responses:
                         try:
                             mid = resp.get("message_id")
                             if mid:
                                 await client(SendReactionRequest(
-                                    peer=entity,
+                                    peer=react_peer2,
                                     msg_id=mid,
                                     reaction=[ReactionEmoji(emoticon="👀")],
                                 ))
