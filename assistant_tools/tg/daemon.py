@@ -210,11 +210,17 @@ async def handle_client(reader: asyncio.StreamReader, writer: asyncio.StreamWrit
                         break
 
                     # Auto-react
+                    from telethon.tl.functions.messages import SendReactionRequest
+                    from telethon.tl.types import ReactionEmoji
                     for resp in responses:
                         try:
                             mid = resp.get("message_id")
                             if mid:
-                                await client.send_reaction(entity, mid, "👀")
+                                await client(SendReactionRequest(
+                                    peer=entity,
+                                    msg_id=mid,
+                                    reaction=[ReactionEmoji(emoticon="👀")],
+                                ))
                         except Exception:
                             pass
                 if responses:
