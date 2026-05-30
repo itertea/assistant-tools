@@ -31,7 +31,7 @@ async def handle_client(reader: asyncio.StreamReader, writer: asyncio.StreamWrit
     import time
     _last_activity = time.time()
     try:
-        data = await reader.read(65536)
+        data = await reader.readline()
         request = json.loads(data.decode())
         cmd = request.get("cmd")
         result: dict[str, Any] = {"ok": False, "error": "unknown command"}
@@ -183,6 +183,9 @@ async def handle_client(reader: asyncio.StreamReader, writer: asyncio.StreamWrit
 
         writer.write(json.dumps(result, ensure_ascii=False).encode())
         await writer.drain()
+        writer.close()
+        await writer.wait_closed()
+        return
     except Exception as e:
         try:
             writer.write(json.dumps({"ok": False, "error": str(e)}, ensure_ascii=False).encode())
@@ -247,15 +250,15 @@ async def daemon_request(request: dict[str, Any]) -> dict[str, Any]:
         return {"ok": False, "error": "daemon not running (no socket)"}
     try:
         reader, writer = await asyncio.open_unix_connection(str(SOCKET_PATH))
-        writer.write(json.dumps(request, ensure_ascii=False).encode())
+        payload = json.dumps(request, ensure_ascii=False).encode() + b"\n"
+        writer.write(payload)
         await writer.drain()
-        writer.write_eof()
+        # Read until daemon sends response (may take long for ask)
         data = await reader.read(1 << 20)
         writer.close()
         await writer.wait_closed()
         return json.loads(data.decode())
     except (ConnectionRefusedError, ConnectionResetError, OSError):
-        # Stale socket — remove it
         SOCKET_PATH.unlink(missing_ok=True)
         return {"ok": False, "error": "daemon not running (no socket)"}
 
@@ -269,7 +272,7 @@ async def ensure_daemon(config: ResolvedTgConfig) -> None:
     if SOCKET_PATH.exists():
         try:
             reader, writer = await asyncio.open_unix_connection(str(SOCKET_PATH))
-            writer.write(json.dumps({"cmd": "ping"}).encode())
+            writer.write(json.dumps({"cmd": "ping"}).encode() + b"\n")
             await writer.drain()
             writer.write_eof()
             data = await reader.read(4096)
@@ -298,7 +301,7 @@ async def ensure_daemon(config: ResolvedTgConfig) -> None:
             # Verify it responds
             try:
                 reader, writer = await asyncio.open_unix_connection(str(SOCKET_PATH))
-                writer.write(json.dumps({"cmd": "ping"}).encode())
+                writer.write(json.dumps({"cmd": "ping"}).encode() + b"\n")
                 await writer.drain()
                 writer.write_eof()
                 data = await reader.read(4096)
