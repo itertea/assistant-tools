@@ -43,14 +43,21 @@ def ensure_path_exists(value: str) -> Path:
 
 
 def emit_result(result: CommandResult) -> None:
-    payload: dict[str, Any] = {
+    def _strip_nulls(obj: Any) -> Any:
+        if isinstance(obj, dict):
+            return {k: _strip_nulls(v) for k, v in obj.items() if v is not None}
+        if isinstance(obj, list):
+            return [_strip_nulls(i) for i in obj]
+        return obj
+
+    payload: dict[str, Any] = _strip_nulls({
         "ok": result.ok,
         "command": result.command,
         "provider": result.provider,
         "data": result.data,
         "error": result.error,
         "meta": result.meta,
-    }
+    })
     json.dump(payload, sys.stdout, ensure_ascii=False)
     sys.stdout.write("\n")
 

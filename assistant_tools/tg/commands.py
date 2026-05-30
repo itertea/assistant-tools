@@ -815,7 +815,13 @@ async def watch(
                     normalized: dict[str, Any] = normalize_message(message, chat_entity=pd["entity"], full=full)
                     normalized["peer"] = pd["peer"]
                     import json as _json
-                    _sys.stdout.write(_json.dumps(normalized, ensure_ascii=False) + "\n")
+                    def _strip(obj: Any) -> Any:
+                        if isinstance(obj, dict):
+                            return {k: _strip(v) for k, v in obj.items() if v is not None}
+                        if isinstance(obj, list):
+                            return [_strip(i) for i in obj]
+                        return obj
+                    _sys.stdout.write(_json.dumps(_strip(normalized), ensure_ascii=False) + "\n")
                     _sys.stdout.flush()
 
             await asyncio.sleep(1.5)
