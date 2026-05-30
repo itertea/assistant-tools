@@ -795,63 +795,55 @@ async def wait_next_message(
 async def watch(
     config: ResolvedTgConfig, peers: list[str], full: bool, include_outgoing: bool
 ) -> CommandResult:
-    """Stream new messages from multiple peers. Prints one JSON line per message, never returns."""
+    """Stream new messages from multiple peers via daemon. Prints one JSON line per message, never returns."""
+    import json as _json
     import sys as _sys
 
-    started_at: datetime = datetime.now(UTC)
+    from assistant_tools.tg.daemon import daemon_request, ensure_daemon
 
-    async with telegram_client(config) as client:
-        me: Any = await client.get_me()
+    await ensure_daemon(config)
 
-        peer_data: list[dict[str, Any]] = []
+    _OMIT = {"media_type", "reply_to_message_id", "action", "caption", "media_group_id", "link", "media", "has_protected_content", "mentioned", "outgoing"}
+
+    def _strip(obj: Any) -> Any:
+        if isinstance(obj, dict):
+            return {k: _strip(v) for k, v in obj.items() if not (v is None and k in _OMIT)}
+        if isinstance(obj, list):
+            return [_strip(i) for i in obj]
+        return obj
+
+    # Get baselines
+    baselines: dict[str, int] = {}
+    for peer in peers:
+        resp = await daemon_request({"cmd": "history", "peer": peer, "limit": 1, "full": False})
+        items = (resp.get("data") or {}).get("items") or []
+        baselines[peer] = items[0]["message_id"] if items else 0
+
+    # Poll loop
+    while True:
         for peer in peers:
-            entity: Any = await _resolve_peer_entity(client, peer)
-            is_self_chat: bool = bool(
-                peer.lower() in {"me", "self"}
-                or isinstance(entity, InputPeerSelf)
-                or (me is not None and getattr(entity, "id", None) == getattr(me, "id", None))
-            )
-            latest: Any = await client.get_messages(entity, limit=1)
-            baseline_id: int = 0
-            if latest:
-                first: Any = latest[0] if isinstance(latest, list) else latest[0]
-                baseline_id = int(getattr(first, "id", 0) or 0)
-            peer_data.append({
-                "peer": peer,
-                "entity": entity,
-                "is_self_chat": is_self_chat,
-                "baseline_id": baseline_id,
-            })
-
-        while True:
-            for pd in peer_data:
-                messages: Any = await client.get_messages(pd["entity"], limit=20)
-                for message in reversed(list(messages or [])):
-                    message_id: int = int(getattr(message, "id", 0) or 0)
-                    message_date: datetime | None = getattr(message, "date", None)
-                    is_after_baseline: bool = message_id > pd["baseline_id"]
-                    is_after_start: bool = bool(
-                        message_date is not None and message_date.astimezone(UTC) >= started_at
-                    )
-                    if not is_after_baseline and not is_after_start:
+            resp = await daemon_request({"cmd": "history", "peer": peer, "limit": 20, "full": full})
+            items = (resp.get("data") or {}).get("items") or []
+            new_msgs = []
+            for msg in reversed(items):
+                mid = msg.get("message_id", 0)
+                if mid <= baselines[peer]:
+                    continue
+                if not include_outgoing:
+                    fr = msg.get("from") or {}
+                    # Skip outgoing unless self-chat
+                    # We check if sender is us by username
+                    if fr.get("username") == "iter_tea":
                         continue
-                    if not include_outgoing and not pd["is_self_chat"] and bool(getattr(message, "out", False)):
-                        continue
-                    pd["baseline_id"] = max(pd["baseline_id"], message_id)
-                    normalized: dict[str, Any] = normalize_message(message, chat_entity=pd["entity"], full=full)
-                    normalized["peer"] = pd["peer"]
-                    import json as _json
-                    _OMIT = {"media_type", "reply_to_message_id", "action", "caption", "media_group_id", "link", "media", "has_protected_content", "mentioned", "outgoing"}
-                    def _strip(obj: Any) -> Any:
-                        if isinstance(obj, dict):
-                            return {k: _strip(v) for k, v in obj.items() if not (v is None and k in _OMIT)}
-                        if isinstance(obj, list):
-                            return [_strip(i) for i in obj]
-                        return obj
-                    _sys.stdout.write(_json.dumps(_strip(normalized), ensure_ascii=False) + "\n")
-                    _sys.stdout.flush()
+                new_msgs.append(msg)
+                baselines[peer] = max(baselines[peer], mid)
 
-            await asyncio.sleep(1.5)
+            for msg in new_msgs:
+                msg["peer"] = peer
+                _sys.stdout.write(_json.dumps(_strip(msg), ensure_ascii=False) + "\n")
+                _sys.stdout.flush()
+
+        await asyncio.sleep(1.5)
 
 
 async def forward_message(
