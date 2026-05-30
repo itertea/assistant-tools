@@ -233,21 +233,25 @@ def _excerpt_text(text: str | None, max_chars: int = 220) -> str | None:
     return collapsed[: max_chars - 1] + "…"
 
 
-def _extract_reactions(message: Message) -> list[str] | None:
-    """Extract reaction emojis from message."""
+def _extract_reactions(message: Message) -> list[dict[str, Any]] | None:
+    """Extract reactions with who reacted."""
     reactions = getattr(message, "reactions", None)
     if not reactions:
         return None
     results = getattr(reactions, "results", None)
     if not results:
         return None
-    emojis: list[str] = []
+    items: list[dict[str, Any]] = []
+    recent = {getattr(getattr(r, "reaction", None), "emoticon", ""): getattr(getattr(r, "peer_id", None), "user_id", None) for r in (getattr(reactions, "recent_reactions", None) or [])}
     for r in results:
         reaction = getattr(r, "reaction", None)
         emoticon = getattr(reaction, "emoticon", None)
         if emoticon:
-            emojis.append(emoticon)
-    return emojis or None
+            entry: dict[str, Any] = {"emoji": emoticon, "count": getattr(r, "count", 1)}
+            if recent.get(emoticon):
+                entry["user_id"] = recent[emoticon]
+            items.append(entry)
+    return items or None
 
 
 def normalize_message(
