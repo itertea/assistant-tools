@@ -14,8 +14,73 @@ from telethon.tl.types import DocumentAttributeFilename
 from telethon.tl.types import DocumentAttributeSticker
 from telethon.tl.types import DocumentAttributeVideo
 from telethon.tl.types import User
+from telethon.tl.types import MessageActionChatAddUser
+from telethon.tl.types import MessageActionChatCreate
+from telethon.tl.types import MessageActionChatDeleteUser
+from telethon.tl.types import MessageActionChatJoinedByLink
+from telethon.tl.types import MessageActionChatJoinedByRequest
+from telethon.tl.types import MessageActionChatEditTitle
+from telethon.tl.types import MessageActionChatEditPhoto
+from telethon.tl.types import MessageActionChatDeletePhoto
+from telethon.tl.types import MessageActionPinMessage
+from telethon.tl.types import MessageActionChannelCreate
 
 from assistant_tools.tg.client import build_message_link
+
+
+def _action_type(message: Message) -> str | None:
+    """Return a short action type string if the message is a service/action message."""
+    action: Any = getattr(message, "action", None)
+    if action is None:
+        return None
+    if isinstance(action, (MessageActionChatAddUser, MessageActionChatJoinedByLink, MessageActionChatJoinedByRequest)):
+        return "join"
+    if isinstance(action, MessageActionChatDeleteUser):
+        return "leave"
+    if isinstance(action, (MessageActionChatCreate, MessageActionChannelCreate)):
+        return "create_chat"
+    if isinstance(action, MessageActionChatEditTitle):
+        return "edit_title"
+    if isinstance(action, (MessageActionChatEditPhoto, MessageActionChatDeletePhoto)):
+        return "edit_photo"
+    if isinstance(action, MessageActionPinMessage):
+        return "pin_message"
+    # Fallback: return class name without prefix
+    cls_name: str = type(action).__name__
+    if cls_name.startswith("MessageAction"):
+        return cls_name[len("MessageAction"):].lower()
+    return "unknown_action"
+
+
+def _action_text(message: Message) -> str | None:
+    """Generate a human-readable text for action messages."""
+    action: Any = getattr(message, "action", None)
+    if action is None:
+        return None
+    action_type = _action_type(message)
+    sender: Any = getattr(message, "sender", None)
+    sender_name: str = ""
+    if sender:
+        first = getattr(sender, "first_name", "") or ""
+        last = getattr(sender, "last_name", "") or ""
+        sender_name = " ".join(p for p in [first, last] if p).strip() or getattr(sender, "username", "") or "?"
+
+    if action_type == "join":
+        if isinstance(action, MessageActionChatAddUser):
+            return f"{sender_name} added users to the chat"
+        return f"{sender_name} joined the chat"
+    if action_type == "leave":
+        return f"{sender_name} left the chat"
+    if action_type == "create_chat":
+        return f"{sender_name} created the chat"
+    if action_type == "edit_title":
+        new_title = getattr(action, "title", "")
+        return f"{sender_name} changed the chat title to \"{new_title}\""
+    if action_type == "pin_message":
+        return f"{sender_name} pinned a message"
+    if action_type == "edit_photo":
+        return f"{sender_name} changed the chat photo"
+    return f"[action: {action_type}]"
 
 
 def iso_datetime(value: datetime | None) -> str | None:
@@ -176,6 +241,10 @@ def normalize_message(
     chat_id: int | None = getattr(chat, "id", None)
     username: str | None = getattr(chat, "username", None)
     message_id: int | None = getattr(message, "id", None)
+    action_type: str | None = _action_type(message)
+    action_text: str | None = _action_text(message) if action_type else None
+    text: str | None = getattr(message, "text", None) or action_text
+
     if not full:
         # For history/get/search we keep full text by default.
         # Truncation/excerpts should happen in higher-level renderers (e.g. Pi tools),
@@ -183,20 +252,23 @@ def normalize_message(
         reply_to_message_id: int | None = getattr(
             getattr(message, "reply_to", None), "reply_to_msg_id", None
         )
-        return {
+        result: dict[str, Any] = {
             "message_id": message_id,
             "date": iso_datetime(getattr(message, "date", None)),
             "from": compact_user(sender),
-            "text": getattr(message, "text", None),
+            "text": text,
             "media_type": _media_kind(message),
             "reply_to_message_id": reply_to_message_id,
         }
-    return {
+        if action_type:
+            result["action"] = action_type
+        return result
+    result = {
         "chat": normalize_chat(chat),
         "message_id": message_id,
         "date": iso_datetime(getattr(message, "date", None)),
         "from": normalize_user(sender),
-        "text": getattr(message, "text", None),
+        "text": text,
         "caption": getattr(message, "text", None),
         "media_type": _media_kind(message),
         "media_group_id": getattr(message, "grouped_id", None),
@@ -207,6 +279,9 @@ def normalize_message(
         "link": build_message_link(chat_id, username, message_id),
         "media": normalize_media(message),
     }
+    if action_type:
+        result["action"] = action_type
+    return result
 
 
 def normalize_dialog(dialog: Dialog, *, full: bool = False) -> dict[str, Any]:

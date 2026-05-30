@@ -283,12 +283,12 @@ def build_parser() -> argparse.ArgumentParser:
     tg_search.add_argument("--full", action="store_true", help="Return fuller message objects")
 
     tg_wait_next = tg_subparsers.add_parser("wait-next", help="Wait for the next incoming message")
-    tg_wait_next.add_argument("peer", help="Target peer")
+    tg_wait_next.add_argument("peer", nargs="+", help="Target peer(s) — one or more")
     tg_wait_next.add_argument(
         "--timeout-seconds",
         type=float,
-        required=True,
-        help="How long to wait before timing out",
+        default=0,
+        help="How long to wait before timing out (0 = infinite)",
     )
     tg_wait_next.add_argument("--full", action="store_true", help="Return fuller message object")
 

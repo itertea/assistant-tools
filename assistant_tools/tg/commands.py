@@ -623,68 +623,81 @@ async def find_dialog(
 
 
 async def wait_next_message(
-    config: ResolvedTgConfig, peer: str, timeout_seconds: float, full: bool
+    config: ResolvedTgConfig, peers: list[str], timeout_seconds: float, full: bool
 ) -> CommandResult:
-    if timeout_seconds <= 0:
-        raise _error("invalid_timeout", "timeout_seconds must be greater than 0", exit_code=2)
+    if timeout_seconds < 0:
+        raise _error("invalid_timeout", "timeout_seconds must be >= 0 (0 = infinite)", exit_code=2)
 
+    infinite: bool = timeout_seconds == 0
     started_at: datetime = datetime.now(UTC)
 
     async with telegram_client(config) as client:
-        entity: Any = await _resolve_peer_entity(client, peer)
         me: Any = await client.get_me()
-        is_self_chat: bool = bool(
-            peer.lower() in {"me", "self"}
-            or isinstance(entity, InputPeerSelf)
-            or (me is not None and getattr(entity, "id", None) == getattr(me, "id", None))
-        )
-        latest: Any = await client.get_messages(entity, limit=1)
-        baseline_id: int = 0
-        if latest:
-            first: Any = latest[0] if isinstance(latest, list) else latest[0]
-            baseline_id = int(getattr(first, "id", 0) or 0)
+
+        # Resolve all peers and record baselines
+        peer_data: list[dict[str, Any]] = []
+        for peer in peers:
+            entity: Any = await _resolve_peer_entity(client, peer)
+            is_self_chat: bool = bool(
+                peer.lower() in {"me", "self"}
+                or isinstance(entity, InputPeerSelf)
+                or (me is not None and getattr(entity, "id", None) == getattr(me, "id", None))
+            )
+            latest: Any = await client.get_messages(entity, limit=1)
+            baseline_id: int = 0
+            if latest:
+                first: Any = latest[0] if isinstance(latest, list) else latest[0]
+                baseline_id = int(getattr(first, "id", 0) or 0)
+            peer_data.append({
+                "peer": peer,
+                "entity": entity,
+                "is_self_chat": is_self_chat,
+                "baseline_id": baseline_id,
+            })
 
         loop: asyncio.AbstractEventLoop = asyncio.get_running_loop()
-        deadline: float = loop.time() + timeout_seconds
+        deadline: float = loop.time() + timeout_seconds if not infinite else float("inf")
         while True:
             remaining: float = deadline - loop.time()
-            if remaining <= 0:
+            if not infinite and remaining <= 0:
                 raise _error(
                     "timeout",
                     f"Timed out waiting for the next incoming message after {timeout_seconds} seconds",
                     exit_code=4,
                 )
 
-            messages: Any = await client.get_messages(entity, limit=50)
-            candidates: list[Any] = []
-            for message in list(messages or []):
-                message_id: int = int(getattr(message, "id", 0) or 0)
-                message_date: datetime | None = getattr(message, "date", None)
-                is_after_baseline: bool = message_id > baseline_id
-                is_after_start: bool = bool(
-                    message_date is not None and message_date.astimezone(UTC) >= started_at
-                )
-                if not is_after_baseline and not is_after_start:
-                    continue
-                if not is_self_chat and bool(getattr(message, "out", False)):
-                    continue
-                candidates.append(message)
+            for pd in peer_data:
+                messages: Any = await client.get_messages(pd["entity"], limit=50)
+                candidates: list[Any] = []
+                for message in list(messages or []):
+                    message_id: int = int(getattr(message, "id", 0) or 0)
+                    message_date: datetime | None = getattr(message, "date", None)
+                    is_after_baseline: bool = message_id > pd["baseline_id"]
+                    is_after_start: bool = bool(
+                        message_date is not None and message_date.astimezone(UTC) >= started_at
+                    )
+                    if not is_after_baseline and not is_after_start:
+                        continue
+                    if not pd["is_self_chat"] and bool(getattr(message, "out", False)):
+                        continue
+                    candidates.append(message)
 
-            if candidates:
-                message = min(candidates, key=lambda item: int(getattr(item, "id", 0) or 0))
-                return _ok(
-                    "tg.wait-next",
-                    {"message": normalize_message(message, chat_entity=entity, full=full)},
-                    {
-                        "peer": peer,
-                        "timeout_seconds": timeout_seconds,
-                        "profile": config.profile,
-                        "full": full,
-                        "baseline_message_id": baseline_id,
-                    },
-                )
+                if candidates:
+                    message = min(candidates, key=lambda item: int(getattr(item, "id", 0) or 0))
+                    return _ok(
+                        "tg.wait-next",
+                        {"message": normalize_message(message, chat_entity=pd["entity"], full=full)},
+                        {
+                            "peer": pd["peer"],
+                            "peers": peers,
+                            "timeout_seconds": timeout_seconds,
+                            "profile": config.profile,
+                            "full": full,
+                            "baseline_message_id": pd["baseline_id"],
+                        },
+                    )
 
-            await asyncio.sleep(min(1.0, max(0.0, remaining)))
+            await asyncio.sleep(1.0 if infinite else min(1.0, max(0.0, remaining)))
 
 
 async def media_info(
