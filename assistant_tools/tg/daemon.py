@@ -118,7 +118,7 @@ async def handle_client(reader: asyncio.StreamReader, writer: asyncio.StreamWrit
             from assistant_tools.tg.sent_db import record_ask, get_last_ask, record_sent, is_own_message
             peer = request["peer"]
             text = request.get("text")
-            timeout = request.get("timeout", 300)
+            timeout = request.get("timeout", 0)  # 0 = infinite
             session_id = request.get("session_id", "default")
             entity = await _resolve_peer_entity(client, peer)
             peer_id = await _get_peer_id(client, entity)
@@ -160,10 +160,10 @@ async def handle_client(reader: asyncio.StreamReader, writer: asyncio.StreamWrit
             if responses:
                 result = {"ok": True, "data": {"responses": responses}}
             else:
-                # Wait for response
+                # Wait for response (infinite if timeout=0)
                 import time
-                deadline = time.time() + timeout
-                while time.time() < deadline:
+                deadline = (time.time() + timeout) if timeout > 0 else None
+                while deadline is None or time.time() < deadline:
                     await asyncio.sleep(1.5)
                     messages_raw = await client.get_messages(entity, limit=10)
                     for msg in reversed(list(messages_raw or [])):

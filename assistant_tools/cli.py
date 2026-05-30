@@ -318,7 +318,7 @@ def build_parser() -> argparse.ArgumentParser:
     tg_ask = tg_subparsers.add_parser("ask", help="Send a question and wait for user's reply")
     tg_ask.add_argument("peer", help="Target peer (usually 'me' for Saved Messages)")
     tg_ask.add_argument("text", nargs="?", default=None, help="Question text (omit to just collect pending replies)")
-    tg_ask.add_argument("--timeout", type=int, default=300, help="Seconds to wait for reply (default 300)")
+    tg_ask.add_argument("--timeout", type=int, default=0, help="Seconds to wait for reply (0 = infinite)")
     tg_ask.add_argument("--parse-mode", default=None, choices=["md", "html"], help="Parse mode for question")
 
     tg_edit = tg_subparsers.add_parser("edit", help="Edit a message sent by kit")
