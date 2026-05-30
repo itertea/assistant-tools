@@ -766,8 +766,8 @@ def dispatch(
     if args.command == "tg":
         tg_config = resolve_tg_config(config, args.profile)
 
-        # If daemon is running, proxy commands through it (except auth and daemon-* commands)
-        if args.tg_command not in ("auth", "daemon-start", "daemon-stop", "daemon-status", "watch"):
+        # Proxy through daemon if supported (daemon decides what it handles)
+        if args.tg_command not in ("auth", "daemon-start", "daemon-stop", "daemon-status"):
             from assistant_tools.tg.daemon import SOCKET_PATH, daemon_request, ensure_daemon
             import asyncio as _asyncio
 
