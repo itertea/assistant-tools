@@ -231,10 +231,10 @@ def build_parser() -> argparse.ArgumentParser:
     )
 
     tg_send_photo = tg_subparsers.add_parser(
-        "send-photo", help="Send local image as Telegram photo"
+        "send-photo", help="Send local image(s) as Telegram photo (multiple = album)"
     )
     tg_send_photo.add_argument("peer", help="Target peer")
-    tg_send_photo.add_argument("path", help="Local image path")
+    tg_send_photo.add_argument("path", nargs="+", help="Local image path(s)")
     tg_send_photo.add_argument("--caption", default=None, help="Optional caption")
     tg_send_photo.add_argument("--reply-to", type=int, default=None, help="Reply target message id")
     tg_send_photo.add_argument(
@@ -870,11 +870,18 @@ def dispatch(
                 )
             )
         if args.tg_command == "send-photo":
-            return tg_commands.run(
-                tg_commands.send_photo(
-                    tg_config, args.peer, str(args.path), args.caption, args.reply_to, args.full
+            if len(args.path) == 1:
+                return tg_commands.run(
+                    tg_commands.send_photo(
+                        tg_config, args.peer, str(args.path[0]), args.caption, args.reply_to, args.full
+                    )
                 )
-            )
+            else:
+                return tg_commands.run(
+                    tg_commands.send_album(
+                        tg_config, args.peer, args.path, args.caption, args.reply_to, args.full
+                    )
+                )
         if args.tg_command == "send-voice":
             return tg_commands.run(
                 tg_commands.send_voice(
