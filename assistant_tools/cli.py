@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 from pathlib import Path
 from typing import Any
 
@@ -389,7 +390,13 @@ def run_stt(
     source: str = str(args.input)
     if not is_url(source):
         ensure_path_exists(source)
-    api_key: str = require_env("GROQ_API_KEY")
+    api_key: str = config.stt.api_key or os.environ.get("GROQ_API_KEY", "")
+    if not api_key:
+        raise AssistantToolsError(
+            "Missing STT API key: set stt.api_key in config or GROQ_API_KEY env var",
+            error_type="missing_env",
+            exit_code=3,
+        )
     model: str = args.model or config.stt.model
     language: str = args.language if args.language is not None else config.stt.language
     timestamps: str = args.timestamps if args.timestamps is not None else config.stt.timestamps
@@ -405,6 +412,7 @@ def run_stt(
         temperature=config.stt.temperature,
         prompt=prompt,
         proxy=config.network.proxy or None,
+        url=config.stt.url or None,
     )
     return CommandResult(
         ok=True,
@@ -592,6 +600,8 @@ def run_video(
         temperature=config.stt.temperature,
         prompt=prompt,
         proxy=config.network.proxy or None,
+        api_key=config.stt.api_key or os.environ.get("GROQ_API_KEY", ""),
+        url=config.stt.url or None,
     )
     return CommandResult(
         ok=True,
