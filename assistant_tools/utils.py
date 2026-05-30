@@ -43,11 +43,22 @@ def ensure_path_exists(value: str) -> Path:
 
 
 def emit_result(result: CommandResult) -> None:
-    def _strip_nulls(obj: Any) -> Any:
+    # Fields that are safe to omit when null (optional/noise fields)
+    _OMIT_WHEN_NULL = {
+        "media_type", "reply_to_message_id", "action", "error",
+        "caption", "media_group_id", "link", "media",
+        "has_protected_content", "mentioned", "outgoing",
+    }
+
+    def _strip_nulls(obj: Any, depth: int = 0) -> Any:
         if isinstance(obj, dict):
-            return {k: _strip_nulls(v) for k, v in obj.items() if v is not None}
+            return {
+                k: _strip_nulls(v, depth + 1)
+                for k, v in obj.items()
+                if not (v is None and k in _OMIT_WHEN_NULL)
+            }
         if isinstance(obj, list):
-            return [_strip_nulls(i) for i in obj]
+            return [_strip_nulls(i, depth + 1) for i in obj]
         return obj
 
     payload: dict[str, Any] = _strip_nulls({

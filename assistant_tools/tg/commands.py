@@ -815,9 +815,10 @@ async def watch(
                     normalized: dict[str, Any] = normalize_message(message, chat_entity=pd["entity"], full=full)
                     normalized["peer"] = pd["peer"]
                     import json as _json
+                    _OMIT = {"media_type", "reply_to_message_id", "action", "caption", "media_group_id", "link", "media", "has_protected_content", "mentioned", "outgoing"}
                     def _strip(obj: Any) -> Any:
                         if isinstance(obj, dict):
-                            return {k: _strip(v) for k, v in obj.items() if v is not None}
+                            return {k: _strip(v) for k, v in obj.items() if not (v is None and k in _OMIT)}
                         if isinstance(obj, list):
                             return [_strip(i) for i in obj]
                         return obj
