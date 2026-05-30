@@ -434,6 +434,7 @@ async def send_file(
     reply_to_message_id: int | None,
     full: bool,
 ) -> CommandResult:
+    from assistant_tools.tg.sent_db import record_sent
     input_path: Path = _ensure_local_file(path_value)
     async with telegram_client(config) as client:
         entity: Any = await _resolve_peer_entity(client, peer)
@@ -444,6 +445,10 @@ async def send_file(
             reply_to=reply_to_message_id,
             force_document=True,
         )
+        peer_id = int(getattr(entity, "id", 0) or 0)
+        msg_id = int(getattr(message, "id", 0) or 0)
+        if peer_id and msg_id:
+            record_sent(config, peer_id, msg_id)
         return _ok(
             "tg.send-file",
             {
@@ -469,6 +474,7 @@ async def send_photo(
     reply_to_message_id: int | None,
     full: bool,
 ) -> CommandResult:
+    from assistant_tools.tg.sent_db import record_sent
     input_path: Path = _ensure_local_file(path_value)
     async with telegram_client(config) as client:
         entity: Any = await _resolve_peer_entity(client, peer)
@@ -479,6 +485,10 @@ async def send_photo(
             reply_to=reply_to_message_id,
             force_document=False,
         )
+        peer_id = int(getattr(entity, "id", 0) or 0)
+        msg_id = int(getattr(message, "id", 0) or 0)
+        if peer_id and msg_id:
+            record_sent(config, peer_id, msg_id)
         return _ok(
             "tg.send-photo",
             {
@@ -504,6 +514,7 @@ async def send_album(
     reply_to_message_id: int | None,
     full: bool,
 ) -> CommandResult:
+    from assistant_tools.tg.sent_db import record_sent
     input_paths: list[Path] = [_ensure_local_file(p) for p in paths]
     async with telegram_client(config) as client:
         entity: Any = await _resolve_peer_entity(client, peer)
@@ -513,8 +524,12 @@ async def send_album(
             caption=caption,
             reply_to=reply_to_message_id,
         )
+        peer_id = int(getattr(entity, "id", 0) or 0)
         items: list[dict[str, Any]] = []
         for msg in (messages if isinstance(messages, list) else [messages]):
+            msg_id = int(getattr(msg, "id", 0) or 0)
+            if peer_id and msg_id:
+                record_sent(config, peer_id, msg_id)
             items.append(normalize_message(msg, chat_entity=entity, full=full))
         return _ok(
             "tg.send-album",
