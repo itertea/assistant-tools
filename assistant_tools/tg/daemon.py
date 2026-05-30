@@ -25,6 +25,10 @@ SOCKET_PATH = Path(tempfile.gettempdir()) / "kit-tg-daemon.sock"
 IDLE_TIMEOUT = 600  # 10 minutes without requests → shutdown
 _last_activity: float = 0.0
 
+# Version = hash of this file, changes on every update
+import hashlib as _hashlib
+_DAEMON_VERSION = _hashlib.md5(Path(__file__).read_bytes()).hexdigest()[:8]
+
 
 async def handle_client(reader: asyncio.StreamReader, writer: asyncio.StreamWriter, client: TelegramClient, config: ResolvedTgConfig) -> None:
     global _last_activity
@@ -37,7 +41,7 @@ async def handle_client(reader: asyncio.StreamReader, writer: asyncio.StreamWrit
         result: dict[str, Any] = {"ok": False, "error": "unknown command"}
 
         if cmd == "ping":
-            result = {"ok": True, "data": "pong"}
+            result = {"ok": True, "data": "pong", "version": _DAEMON_VERSION}
 
         elif cmd == "history":
             peer = request["peer"]
@@ -311,7 +315,11 @@ async def ensure_daemon(config: ResolvedTgConfig) -> None:
             await writer.wait_closed()
             resp = json.loads(data.decode())
             if resp.get("ok"):
-                return  # Daemon is alive
+                # Check version — restart if outdated
+                if resp.get("version") == _DAEMON_VERSION:
+                    return  # Daemon is alive and up-to-date
+                # Kill outdated daemon
+                SOCKET_PATH.unlink(missing_ok=True)
         except (ConnectionRefusedError, ConnectionResetError, OSError):
             SOCKET_PATH.unlink(missing_ok=True)
 
