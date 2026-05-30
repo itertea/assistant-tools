@@ -219,3 +219,7 @@ async def ensure_daemon(config: ResolvedTgConfig) -> None:
                     return
             except (ConnectionRefusedError, ConnectionResetError, OSError):
                 continue
+
+    # Daemon failed to start
+    print("warning: kit tg daemon failed to start within 3s. Falling back to direct connection.", file=sys.stderr)
+    print(f"  hint: try running 'TELEGRAM_API_ID=... kit tg daemon-start' manually to see errors", file=sys.stderr)
