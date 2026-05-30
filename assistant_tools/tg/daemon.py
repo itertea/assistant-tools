@@ -181,8 +181,7 @@ async def handle_client(reader: asyncio.StreamReader, writer: asyncio.StreamWrit
                 # Auto-react to show user the agent read the message
                 from telethon.tl.functions.messages import SendReactionRequest
                 from telethon.tl.types import ReactionEmoji, InputPeerUser
-                me_entity = await client.get_me()
-                react_peer = InputPeerUser(user_id=me_entity.id, access_hash=me_entity.access_hash) if isinstance(entity, InputPeerSelf) else entity
+                react_peer = await client.get_input_entity(await client.get_me())
                 for resp in responses:
                     try:
                         mid = resp.get("message_id")
@@ -217,8 +216,7 @@ async def handle_client(reader: asyncio.StreamReader, writer: asyncio.StreamWrit
                     # Auto-react
                     from telethon.tl.functions.messages import SendReactionRequest
                     from telethon.tl.types import ReactionEmoji, InputPeerUser
-                    me_entity2 = await client.get_me()
-                    react_peer2 = InputPeerUser(user_id=me_entity2.id, access_hash=me_entity2.access_hash) if isinstance(entity, InputPeerSelf) else entity
+                    react_peer2 = await client.get_input_entity(await client.get_me())
                     for resp in responses:
                         try:
                             mid = resp.get("message_id")
