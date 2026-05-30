@@ -177,7 +177,6 @@ async def handle_client(reader: asyncio.StreamReader, writer: asyncio.StreamWrit
                 if _is_user_reply(msg, mid):
                     responses.append(normalize_message(msg, chat_entity=entity))
 
-                print(f"DEBUG REACT: entity={type(entity).__name__}, isinstance_self={isinstance(entity, InputPeerSelf)}, responses_count={len(responses)}", file=sys.stderr)
             if responses:
                 # Auto-react to show user the agent read the message
                 from telethon.tl.functions.messages import SendReactionRequest
