@@ -768,13 +768,16 @@ def dispatch(
 
         # If daemon is running, proxy commands through it (except auth and daemon-* commands)
         if args.tg_command not in ("auth", "daemon-start", "daemon-stop", "daemon-status"):
-            from assistant_tools.tg.daemon import SOCKET_PATH, daemon_request
-            if SOCKET_PATH.exists():
-                import asyncio as _asyncio
-                # Build daemon request from args
-                daemon_cmd = _build_daemon_request(args)
-                if daemon_cmd is not None:
-                    resp = _asyncio.run(daemon_request(daemon_cmd))
+            from assistant_tools.tg.daemon import SOCKET_PATH, daemon_request, ensure_daemon
+            import asyncio as _asyncio
+
+            daemon_cmd = _build_daemon_request(args)
+            if daemon_cmd is not None:
+                # Ensure daemon is running (auto-start if needed)
+                _asyncio.run(ensure_daemon(tg_config))
+
+                resp = _asyncio.run(daemon_request(daemon_cmd))
+                if resp.get("ok") or resp.get("error") != "daemon not running (no socket)":
                     return CommandResult(
                         ok=resp.get("ok", False),
                         command=f"tg.{args.tg_command}",

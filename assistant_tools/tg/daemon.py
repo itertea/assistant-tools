@@ -156,11 +156,66 @@ async def daemon_request(request: dict[str, Any]) -> dict[str, Any]:
     """Send a request to the running daemon and return the response."""
     if not SOCKET_PATH.exists():
         return {"ok": False, "error": "daemon not running (no socket)"}
-    reader, writer = await asyncio.open_unix_connection(str(SOCKET_PATH))
-    writer.write(json.dumps(request, ensure_ascii=False).encode())
-    await writer.drain()
-    writer.write_eof()
-    data = await reader.read(1 << 20)
-    writer.close()
-    await writer.wait_closed()
-    return json.loads(data.decode())
+    try:
+        reader, writer = await asyncio.open_unix_connection(str(SOCKET_PATH))
+        writer.write(json.dumps(request, ensure_ascii=False).encode())
+        await writer.drain()
+        writer.write_eof()
+        data = await reader.read(1 << 20)
+        writer.close()
+        await writer.wait_closed()
+        return json.loads(data.decode())
+    except (ConnectionRefusedError, ConnectionResetError, OSError):
+        # Stale socket — remove it
+        SOCKET_PATH.unlink(missing_ok=True)
+        return {"ok": False, "error": "daemon not running (no socket)"}
+
+
+async def ensure_daemon(config: ResolvedTgConfig) -> None:
+    """Ensure daemon is running. Start it as a background subprocess if not."""
+    import subprocess
+    import time
+
+    # Check if socket exists and daemon responds
+    if SOCKET_PATH.exists():
+        try:
+            reader, writer = await asyncio.open_unix_connection(str(SOCKET_PATH))
+            writer.write(json.dumps({"cmd": "ping"}).encode())
+            await writer.drain()
+            writer.write_eof()
+            data = await reader.read(4096)
+            writer.close()
+            await writer.wait_closed()
+            resp = json.loads(data.decode())
+            if resp.get("ok"):
+                return  # Daemon is alive
+        except (ConnectionRefusedError, ConnectionResetError, OSError):
+            SOCKET_PATH.unlink(missing_ok=True)
+
+    # Start daemon as background process
+    env = os.environ.copy()
+    subprocess.Popen(
+        [sys.executable, "-m", "assistant_tools.tg.daemon_runner"],
+        env=env,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        start_new_session=True,
+    )
+
+    # Wait for socket to appear
+    for _ in range(30):  # 3 seconds max
+        await asyncio.sleep(0.1)
+        if SOCKET_PATH.exists():
+            # Verify it responds
+            try:
+                reader, writer = await asyncio.open_unix_connection(str(SOCKET_PATH))
+                writer.write(json.dumps({"cmd": "ping"}).encode())
+                await writer.drain()
+                writer.write_eof()
+                data = await reader.read(4096)
+                writer.close()
+                await writer.wait_closed()
+                if json.loads(data.decode()).get("ok"):
+                    return
+            except (ConnectionRefusedError, ConnectionResetError, OSError):
+                continue
