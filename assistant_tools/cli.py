@@ -316,10 +316,6 @@ def build_parser() -> argparse.ArgumentParser:
     )
     tg_find_dialog.add_argument("query", help="Search query (name, username, title)")
     tg_find_dialog.add_argument("--limit", type=int, default=20, help="Max results to return")
-    tg_find_dialog.add_argument(
-        "--embeddings", action="store_true",
-        help="Use DeepInfra embeddings instead of Telegram search (requires DEEPINFRA_TOKEN)",
-    )
     tg_find_dialog.add_argument("--top", type=int, default=10, help="Top matches (embeddings mode)")
     tg_find_dialog.add_argument(
         "--model", default="BAAI/bge-m3-multi", help="Embeddings model (embeddings mode)",
@@ -728,7 +724,8 @@ def dispatch(
         if args.tg_command == "resolve":
             return tg_commands.run(tg_commands.resolve_peer(tg_config, args.peer))
         if args.tg_command == "find-dialog":
-            if args.embeddings:
+            import os
+            if os.environ.get("DEEPINFRA_TOKEN"):
                 return tg_commands.run(
                     tg_commands.find_dialog_embeddings(
                         tg_config,
