@@ -192,8 +192,10 @@ async def handle_client(reader: asyncio.StreamReader, writer: asyncio.StreamWrit
                                 msg_id=mid,
                                 reaction=[ReactionEmoji(emoticon="👀")],
                             ))
-                    except Exception:
-                        pass
+                    except Exception as react_err:
+                        import traceback
+                        print(f"REACT ERROR: {react_err}", file=sys.stderr)
+                        traceback.print_exc(file=sys.stderr)
                 result = {"ok": True, "data": {"responses": responses}}
             else:
                 # Wait for response (infinite if timeout=0)
