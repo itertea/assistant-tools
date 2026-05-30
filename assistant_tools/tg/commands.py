@@ -720,18 +720,10 @@ async def wait_next_message(
     if timeout_seconds < 0:
         raise _error("invalid_timeout", "timeout_seconds must be >= 0 (0 = infinite)", exit_code=2)
 
-    import shutil
-    from dataclasses import replace
-
     infinite: bool = timeout_seconds == 0
     started_at: datetime = datetime.now(UTC)
 
-    # Use a copy of session file to avoid locking the main one
-    wait_session = config.session_file.parent / f"{config.profile}_wait.session"
-    shutil.copy2(str(config.session_file), str(wait_session))
-    wait_config = replace(config, session_file=wait_session)
-
-    async with telegram_client(wait_config) as client:
+    async with telegram_client(config) as client:
         me: Any = await client.get_me()
 
         # Resolve all peers and record baselines
@@ -804,18 +796,11 @@ async def watch(
     config: ResolvedTgConfig, peers: list[str], full: bool, include_outgoing: bool
 ) -> CommandResult:
     """Stream new messages from multiple peers. Prints one JSON line per message, never returns."""
-    import shutil
     import sys as _sys
-    from dataclasses import replace
 
     started_at: datetime = datetime.now(UTC)
 
-    # Use a copy of session file to avoid locking the main one
-    watch_session = config.session_file.parent / f"{config.profile}_watch.session"
-    shutil.copy2(str(config.session_file), str(watch_session))
-    watch_config = replace(config, session_file=watch_session)
-
-    async with telegram_client(watch_config) as client:
+    async with telegram_client(config) as client:
         me: Any = await client.get_me()
 
         peer_data: list[dict[str, Any]] = []
