@@ -140,6 +140,15 @@ async def handle_client(reader: asyncio.StreamReader, writer: asyncio.StreamWrit
                     record_ask(config, peer_id, msg_id, session_id)
                     baseline_id = msg_id
 
+            # If no text and no previous ask — nothing to wait for
+            if not text and baseline_id == 0:
+                result = {"ok": True, "data": {"responses": []}}
+                writer.write(json.dumps(result, ensure_ascii=False).encode())
+                await writer.drain()
+                writer.close()
+                await writer.wait_closed()
+                return
+
             def _is_user_reply(msg: Any, mid: int) -> bool:
                 """Check if message is a user reply (not sent by kit)."""
                 if mid <= baseline_id:
