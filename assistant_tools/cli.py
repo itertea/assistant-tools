@@ -726,6 +726,31 @@ def run_tg_speak(
     )
 
 
+def _daemon_middleware(args: Any, tg_config: Any) -> CommandResult | None:
+    """Middleware: if daemon can handle this command, proxy through it. Returns None to fall through."""
+    import asyncio as _asyncio
+    from assistant_tools.tg.daemon import daemon_request, ensure_daemon
+
+    daemon_cmd = _build_daemon_request(args)
+    if daemon_cmd is None:
+        return None
+
+    _asyncio.run(ensure_daemon(tg_config))
+    resp = _asyncio.run(daemon_request(daemon_cmd))
+
+    if not resp.get("ok") and resp.get("error") == "daemon not running (no socket)":
+        return None  # Fall through to direct connection
+
+    return CommandResult(
+        ok=resp.get("ok", False),
+        command=f"tg.{args.tg_command}",
+        provider="daemon",
+        data=resp.get("data"),
+        error=resp.get("error"),
+        meta={"daemon": True, "profile": tg_config.profile},
+    )
+
+
 def _build_daemon_request(args: Any) -> dict[str, Any] | None:
     """Convert CLI args to a daemon request dict. Returns None if command not supported by daemon."""
     cmd = args.tg_command
@@ -766,26 +791,10 @@ def dispatch(
     if args.command == "tg":
         tg_config = resolve_tg_config(config, args.profile)
 
-        # Proxy through daemon if supported (daemon decides what it handles)
-        if args.tg_command not in ("auth", "daemon-start", "daemon-stop", "daemon-status"):
-            from assistant_tools.tg.daemon import SOCKET_PATH, daemon_request, ensure_daemon
-            import asyncio as _asyncio
-
-            daemon_cmd = _build_daemon_request(args)
-            if daemon_cmd is not None:
-                # Ensure daemon is running (auto-start if needed)
-                _asyncio.run(ensure_daemon(tg_config))
-
-                resp = _asyncio.run(daemon_request(daemon_cmd))
-                if resp.get("ok") or resp.get("error") != "daemon not running (no socket)":
-                    return CommandResult(
-                        ok=resp.get("ok", False),
-                        command=f"tg.{args.tg_command}",
-                        provider="daemon",
-                        data=resp.get("data"),
-                        error=resp.get("error"),
-                        meta={"daemon": True, "profile": tg_config.profile},
-                    )
+        # Daemon middleware: transparently proxies supported commands through daemon
+        result = _daemon_middleware(args, tg_config)
+        if result is not None:
+            return result
 
         if args.tg_command == "auth":
             if args.tg_auth_command == "login":
