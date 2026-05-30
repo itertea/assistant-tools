@@ -359,9 +359,9 @@ def build_parser() -> argparse.ArgumentParser:
         "--model", default="BAAI/bge-m3-multi", help="Embeddings model (embeddings mode)",
     )
 
-    tg_subparsers.add_parser("daemon-start", help="Start the Telegram daemon (persistent connection)")
-    tg_subparsers.add_parser("daemon-stop", help="Stop the Telegram daemon")
-    tg_subparsers.add_parser("daemon-status", help="Check if daemon is running")
+    tg_subparsers.add_parser("daemon-start", help=argparse.SUPPRESS)
+    tg_subparsers.add_parser("daemon-stop", help=argparse.SUPPRESS)
+    tg_subparsers.add_parser("daemon-status", help=argparse.SUPPRESS)
 
     return parser
 

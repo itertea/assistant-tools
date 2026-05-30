@@ -22,9 +22,14 @@ from assistant_tools.tg.normalize import normalize_chat
 
 
 SOCKET_PATH = Path(tempfile.gettempdir()) / "kit-tg-daemon.sock"
+IDLE_TIMEOUT = 600  # 10 minutes without requests → shutdown
+_last_activity: float = 0.0
 
 
 async def handle_client(reader: asyncio.StreamReader, writer: asyncio.StreamWriter, client: TelegramClient, config: ResolvedTgConfig) -> None:
+    global _last_activity
+    import time
+    _last_activity = time.time()
     try:
         data = await reader.read(65536)
         request = json.loads(data.decode())
@@ -124,10 +129,11 @@ async def handle_client(reader: asyncio.StreamReader, writer: asyncio.StreamWrit
 
             # Send question if provided
             if text:
-                kwargs_ask: dict[str, Any] = {}
-                if request.get("parse_mode"):
-                    kwargs_ask["parse_mode"] = request["parse_mode"]
-                sent_msg = await client.send_message(entity, text, **kwargs_ask)
+                # Format ask message with session tag and visual distinction
+                session_tag = session_id.replace("/dev/pts/", "pts").replace("/", "_")
+                formatted = f"❓ **#ask_{session_tag}**\n\n{text}"
+                kwargs_ask: dict[str, Any] = {"parse_mode": "md"}
+                sent_msg = await client.send_message(entity, formatted, **kwargs_ask)
                 msg_id = int(getattr(sent_msg, "id", 0) or 0)
                 if peer_id and msg_id:
                     record_sent(config, peer_id, msg_id)
@@ -212,8 +218,25 @@ async def run_daemon(config: ResolvedTgConfig) -> None:
         )
         os.chmod(str(SOCKET_PATH), 0o600)
 
+        async def _idle_watchdog() -> None:
+            global _last_activity
+            import time
+            _last_activity = time.time()
+            while True:
+                await asyncio.sleep(30)
+                if time.time() - _last_activity > IDLE_TIMEOUT:
+                    server.close()
+                    return
+
         async with server:
-            await server.serve_forever()
+            watchdog = asyncio.create_task(_idle_watchdog())
+            try:
+                await server.serve_forever()
+            except asyncio.CancelledError:
+                pass
+            finally:
+                watchdog.cancel()
+                SOCKET_PATH.unlink(missing_ok=True)
 
 
 async def daemon_request(request: dict[str, Any]) -> dict[str, Any]:
