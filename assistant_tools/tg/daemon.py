@@ -130,7 +130,7 @@ async def handle_client(reader: asyncio.StreamReader, writer: asyncio.StreamWrit
             # Send question if provided
             if text:
                 # Format ask message with session tag and visual distinction
-                session_tag = session_id.replace("/dev/pts/", "pts").replace("/", "_")
+                session_tag = session_id.replace("/dev/pts/", "pts").replace("/", "_").replace("-", "_")
                 formatted = f"❓ **#ask_{session_tag}**\n\n{text}"
                 kwargs_ask: dict[str, Any] = {"parse_mode": "md"}
                 sent_msg = await client.send_message(entity, formatted, **kwargs_ask)
