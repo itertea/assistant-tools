@@ -43,6 +43,12 @@ async def handle_client(reader: asyncio.StreamReader, writer: asyncio.StreamWrit
         if cmd == "ping":
             result = {"ok": True, "data": "pong", "version": _DAEMON_VERSION}
 
+        elif cmd == "shutdown":
+            # Graceful shutdown
+            import signal
+            os.kill(os.getpid(), signal.SIGTERM)
+            result = {"ok": True, "data": "shutting down"}
+
         elif cmd == "history":
             peer = request["peer"]
             limit = request.get("limit", 10)
@@ -319,6 +325,15 @@ async def ensure_daemon(config: ResolvedTgConfig) -> None:
                 if resp.get("version") == _DAEMON_VERSION:
                     return  # Daemon is alive and up-to-date
                 # Kill outdated daemon
+                try:
+                    r2, w2 = await asyncio.open_unix_connection(str(SOCKET_PATH))
+                    w2.write(json.dumps({"cmd": "shutdown"}).encode() + b"\n")
+                    await w2.drain()
+                    w2.close()
+                    await w2.wait_closed()
+                except Exception:
+                    pass
+                await asyncio.sleep(2)
                 SOCKET_PATH.unlink(missing_ok=True)
         except (ConnectionRefusedError, ConnectionResetError, OSError):
             SOCKET_PATH.unlink(missing_ok=True)
