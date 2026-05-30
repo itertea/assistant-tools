@@ -303,6 +303,13 @@ def build_parser() -> argparse.ArgumentParser:
     tg_watch.add_argument("--full", action="store_true", help="Return fuller message objects")
     tg_watch.add_argument("--include-outgoing", action="store_true", help="Include own messages")
 
+    tg_send_album = tg_subparsers.add_parser("send-album", help="Send multiple files as an album")
+    tg_send_album.add_argument("peer", help="Target peer")
+    tg_send_album.add_argument("paths", nargs="+", help="Local file paths")
+    tg_send_album.add_argument("--caption", default=None, help="Optional caption")
+    tg_send_album.add_argument("--reply-to", type=int, default=None, help="Reply target message id")
+    tg_send_album.add_argument("--full", action="store_true", help="Return fuller message objects")
+
     tg_media_download = tg_subparsers.add_parser("media-download", help="Download message media")
     tg_media_download.add_argument("peer", help="Target peer")
     tg_media_download.add_argument("message_id", type=int, help="Message id")
@@ -790,6 +797,12 @@ def dispatch(
             )
         if args.tg_command == "speak":
             return run_tg_speak(args, config, tg_config, verbose, config_path)
+        if args.tg_command == "send-album":
+            return tg_commands.run(
+                tg_commands.send_album(
+                    tg_config, args.peer, args.paths, args.caption, args.reply_to, args.full
+                )
+            )
         if args.tg_command == "react":
             return tg_commands.run(
                 tg_commands.react(tg_config, args.peer, args.message_id, args.emoji)

@@ -491,6 +491,40 @@ async def send_photo(
         )
 
 
+async def send_album(
+    config: ResolvedTgConfig,
+    peer: str,
+    paths: list[str],
+    caption: str | None,
+    reply_to_message_id: int | None,
+    full: bool,
+) -> CommandResult:
+    input_paths: list[Path] = [_ensure_local_file(p) for p in paths]
+    async with telegram_client(config) as client:
+        entity: Any = await _resolve_peer_entity(client, peer)
+        messages: Any = await client.send_file(
+            entity,
+            [str(p) for p in input_paths],
+            caption=caption,
+            reply_to=reply_to_message_id,
+        )
+        items: list[dict[str, Any]] = []
+        for msg in (messages if isinstance(messages, list) else [messages]):
+            items.append(normalize_message(msg, chat_entity=entity, full=full))
+        return _ok(
+            "tg.send-album",
+            {"messages": items},
+            {
+                "peer": peer,
+                "paths": [str(p) for p in input_paths],
+                "caption": caption,
+                "reply_to_message_id": reply_to_message_id,
+                "profile": config.profile,
+                "full": full,
+            },
+        )
+
+
 async def send_voice(
     config: ResolvedTgConfig,
     peer: str,
