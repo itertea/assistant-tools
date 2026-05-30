@@ -398,14 +398,16 @@ async def get_messages(
 
 
 async def send_message(
-    config: ResolvedTgConfig, peer: str, text: str, reply_to_message_id: int | None, full: bool
+    config: ResolvedTgConfig, peer: str, text: str, reply_to_message_id: int | None, full: bool, parse_mode: str | None = None
 ) -> CommandResult:
     async with telegram_client(config) as client:
         entity: Any = await _resolve_peer_entity(client, peer)
-        if reply_to_message_id is None:
-            message: Any = await client.send_message(entity, text)
-        else:
-            message = await client.send_message(entity, text, reply_to=reply_to_message_id)
+        kwargs: dict[str, Any] = {}
+        if reply_to_message_id is not None:
+            kwargs["reply_to"] = reply_to_message_id
+        if parse_mode:
+            kwargs["parse_mode"] = parse_mode
+        message: Any = await client.send_message(entity, text, **kwargs)
         return _ok(
             "tg.send",
             {"message": normalize_message(message, chat_entity=entity, full=full)},
@@ -414,6 +416,7 @@ async def send_message(
                 "reply_to_message_id": reply_to_message_id,
                 "profile": config.profile,
                 "full": full,
+                "parse_mode": parse_mode,
             },
         )
 
@@ -722,6 +725,61 @@ async def wait_next_message(
                     )
 
             await asyncio.sleep(1.0 if infinite else min(1.0, max(0.0, remaining)))
+
+
+async def watch(
+    config: ResolvedTgConfig, peers: list[str], full: bool, include_outgoing: bool
+) -> CommandResult:
+    """Stream new messages from multiple peers. Prints one JSON line per message, never returns."""
+    import sys as _sys
+
+    started_at: datetime = datetime.now(UTC)
+
+    async with telegram_client(config) as client:
+        me: Any = await client.get_me()
+
+        peer_data: list[dict[str, Any]] = []
+        for peer in peers:
+            entity: Any = await _resolve_peer_entity(client, peer)
+            is_self_chat: bool = bool(
+                peer.lower() in {"me", "self"}
+                or isinstance(entity, InputPeerSelf)
+                or (me is not None and getattr(entity, "id", None) == getattr(me, "id", None))
+            )
+            latest: Any = await client.get_messages(entity, limit=1)
+            baseline_id: int = 0
+            if latest:
+                first: Any = latest[0] if isinstance(latest, list) else latest[0]
+                baseline_id = int(getattr(first, "id", 0) or 0)
+            peer_data.append({
+                "peer": peer,
+                "entity": entity,
+                "is_self_chat": is_self_chat,
+                "baseline_id": baseline_id,
+            })
+
+        while True:
+            for pd in peer_data:
+                messages: Any = await client.get_messages(pd["entity"], limit=20)
+                for message in reversed(list(messages or [])):
+                    message_id: int = int(getattr(message, "id", 0) or 0)
+                    message_date: datetime | None = getattr(message, "date", None)
+                    is_after_baseline: bool = message_id > pd["baseline_id"]
+                    is_after_start: bool = bool(
+                        message_date is not None and message_date.astimezone(UTC) >= started_at
+                    )
+                    if not is_after_baseline and not is_after_start:
+                        continue
+                    if not include_outgoing and not pd["is_self_chat"] and bool(getattr(message, "out", False)):
+                        continue
+                    pd["baseline_id"] = max(pd["baseline_id"], message_id)
+                    normalized: dict[str, Any] = normalize_message(message, chat_entity=pd["entity"], full=full)
+                    normalized["peer"] = pd["peer"]
+                    import json as _json
+                    _sys.stdout.write(_json.dumps(normalized, ensure_ascii=False) + "\n")
+                    _sys.stdout.flush()
+
+            await asyncio.sleep(1.5)
 
 
 async def media_info(
