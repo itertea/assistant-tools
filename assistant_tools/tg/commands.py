@@ -875,12 +875,12 @@ async def forward_message(
 async def edit_message(
     config: ResolvedTgConfig, peer: str, message_id: int, text: str, parse_mode: str | None = None
 ) -> CommandResult:
+    from assistant_tools.tg.sent_db import is_own_message
     async with telegram_client(config) as client:
         entity: Any = await _resolve_peer_entity(client, peer)
-        # Verify it's our own message
-        msg_obj: Any = await client.get_messages(entity, ids=message_id)
-        if not msg_obj or not getattr(msg_obj, "out", False):
-            raise _error("not_own_message", "Can only edit your own messages", exit_code=3)
+        peer_id: int = await _get_peer_id(client, entity)
+        if not is_own_message(config, peer_id, message_id):
+            raise _error("not_own_message", "Can only edit messages sent by kit", exit_code=3)
         kwargs: dict[str, Any] = {}
         if parse_mode:
             kwargs["parse_mode"] = parse_mode
@@ -895,14 +895,13 @@ async def edit_message(
 async def delete_message(
     config: ResolvedTgConfig, peer: str, message_ids: list[int]
 ) -> CommandResult:
+    from assistant_tools.tg.sent_db import is_own_message
     async with telegram_client(config) as client:
         entity: Any = await _resolve_peer_entity(client, peer)
-        # Verify all messages are our own
-        msgs: Any = await client.get_messages(entity, ids=message_ids)
-        for msg in (msgs if isinstance(msgs, list) else [msgs]):
-            if msg and not getattr(msg, "out", False):
-                mid = getattr(msg, "id", "?")
-                raise _error("not_own_message", f"Can only delete your own messages (message_id={mid})", exit_code=3)
+        peer_id: int = await _get_peer_id(client, entity)
+        for mid in message_ids:
+            if not is_own_message(config, peer_id, mid):
+                raise _error("not_own_message", f"Can only delete messages sent by kit (message_id={mid})", exit_code=3)
         await client.delete_messages(entity, message_ids)
         return _ok(
             "tg.delete",
