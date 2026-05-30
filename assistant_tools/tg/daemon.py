@@ -213,21 +213,19 @@ async def handle_client(reader: asyncio.StreamReader, writer: asyncio.StreamWrit
                     if responses:
                         break
 
-                    # Auto-react
-                    from telethon.tl.functions.messages import SendReactionRequest
-                    from telethon.tl.types import ReactionEmoji, InputPeerUser
+                # Auto-react after getting responses from wait loop
+                if responses:
+                    from telethon.tl.functions.messages import SendReactionRequest as SR2
+                    from telethon.tl.types import ReactionEmoji as RE2
                     react_peer2 = await client.get_input_entity(await client.get_me())
                     for resp in responses:
                         try:
                             mid = resp.get("message_id")
                             if mid:
-                                await client(SendReactionRequest(
-                                    peer=react_peer2,
-                                    msg_id=mid,
-                                    reaction=[ReactionEmoji(emoticon="👀")],
-                                ))
+                                await client(SR2(peer=react_peer2, msg_id=mid, reaction=[RE2(emoticon="👀")]))
                         except Exception:
                             pass
+
                 if responses:
                     result = {"ok": True, "data": {"responses": responses}}
                 else:
