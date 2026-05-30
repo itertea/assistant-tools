@@ -241,15 +241,23 @@ def _extract_reactions(message: Message) -> list[dict[str, Any]] | None:
     results = getattr(reactions, "results", None)
     if not results:
         return None
+    # Build emoji → [user_ids] map from recent_reactions
+    from collections import defaultdict
+    emoji_users: dict[str, list[int]] = defaultdict(list)
+    for r in (getattr(reactions, "recent_reactions", None) or []):
+        emoticon = getattr(getattr(r, "reaction", None), "emoticon", None)
+        user_id = getattr(getattr(r, "peer_id", None), "user_id", None)
+        if emoticon and user_id:
+            emoji_users[emoticon].append(user_id)
+
     items: list[dict[str, Any]] = []
-    recent = {getattr(getattr(r, "reaction", None), "emoticon", ""): getattr(getattr(r, "peer_id", None), "user_id", None) for r in (getattr(reactions, "recent_reactions", None) or [])}
     for r in results:
         reaction = getattr(r, "reaction", None)
         emoticon = getattr(reaction, "emoticon", None)
         if emoticon:
             entry: dict[str, Any] = {"emoji": emoticon, "count": getattr(r, "count", 1)}
-            if recent.get(emoticon):
-                entry["user_id"] = recent[emoticon]
+            if emoji_users.get(emoticon):
+                entry["user_ids"] = emoji_users[emoticon]
             items.append(entry)
     return items or None
 
