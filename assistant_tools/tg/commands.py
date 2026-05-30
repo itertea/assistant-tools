@@ -111,6 +111,17 @@ async def _resolve_peer_entity(client: TelegramClient, peer: str) -> Any:
         return await client.get_entity(peer)
 
 
+async def _get_peer_id(client: TelegramClient, entity: Any) -> int:
+    """Get numeric peer ID, handling InputPeerSelf."""
+    eid: int = int(getattr(entity, "id", 0) or getattr(entity, "user_id", 0) or getattr(entity, "channel_id", 0) or getattr(entity, "chat_id", 0) or 0)
+    if eid:
+        return eid
+    if isinstance(entity, InputPeerSelf):
+        me: Any = await client.get_me()
+        return int(getattr(me, "id", 0) or 0)
+    return 0
+
+
 def _voice_upload_path(path: Path) -> tuple[Path, bool]:
     suffix: str = path.suffix.lower()
     if suffix in {".ogg", ".opus"}:
@@ -409,7 +420,7 @@ async def send_message(
         if parse_mode:
             kwargs["parse_mode"] = parse_mode
         message: Any = await client.send_message(entity, text, **kwargs)
-        peer_id = getattr(entity, "id", None) or getattr(getattr(entity, "user_id", None), "id", 0)
+        peer_id = await _get_peer_id(client, entity)
         msg_id = getattr(message, "id", 0)
         if peer_id and msg_id:
             record_sent(config, int(peer_id), int(msg_id))
@@ -445,7 +456,7 @@ async def send_file(
             reply_to=reply_to_message_id,
             force_document=True,
         )
-        peer_id = int(getattr(entity, "id", 0) or 0)
+        peer_id = await _get_peer_id(client, entity)
         msg_id = int(getattr(message, "id", 0) or 0)
         if peer_id and msg_id:
             record_sent(config, peer_id, msg_id)
@@ -485,7 +496,7 @@ async def send_photo(
             reply_to=reply_to_message_id,
             force_document=False,
         )
-        peer_id = int(getattr(entity, "id", 0) or 0)
+        peer_id = await _get_peer_id(client, entity)
         msg_id = int(getattr(message, "id", 0) or 0)
         if peer_id and msg_id:
             record_sent(config, peer_id, msg_id)
@@ -524,7 +535,7 @@ async def send_album(
             caption=caption,
             reply_to=reply_to_message_id,
         )
-        peer_id = int(getattr(entity, "id", 0) or 0)
+        peer_id = await _get_peer_id(client, entity)
         items: list[dict[str, Any]] = []
         for msg in (messages if isinstance(messages, list) else [messages]):
             msg_id = int(getattr(msg, "id", 0) or 0)
@@ -867,7 +878,7 @@ async def edit_message(
     from assistant_tools.tg.sent_db import is_own_message
     async with telegram_client(config) as client:
         entity: Any = await _resolve_peer_entity(client, peer)
-        peer_id: int = int(getattr(entity, "id", 0) or 0)
+        peer_id: int = await _get_peer_id(client, entity)
         if not is_own_message(config, peer_id, message_id):
             raise _error("not_own_message", "Can only edit messages sent by kit", exit_code=3)
         kwargs: dict[str, Any] = {}
@@ -887,7 +898,7 @@ async def delete_message(
     from assistant_tools.tg.sent_db import is_own_message
     async with telegram_client(config) as client:
         entity: Any = await _resolve_peer_entity(client, peer)
-        peer_id: int = int(getattr(entity, "id", 0) or 0)
+        peer_id: int = await _get_peer_id(client, entity)
         for mid in message_ids:
             if not is_own_message(config, peer_id, mid):
                 raise _error("not_own_message", f"Can only delete messages sent by kit (message_id={mid})", exit_code=3)
