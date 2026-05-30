@@ -455,3 +455,20 @@ hide_password = false
 [tg.profiles.work]
 session_file = "~/.local/state/assistant-tools/tg/work.session"
 ```
+
+## STT Configuration
+
+In `~/.config/assistant-tools/config.toml`:
+
+```toml
+[stt]
+# For Groq directly:
+url = "https://api.groq.com/openai/v1/audio/transcriptions"
+api_key = "gsk_..."
+model = "whisper-large-v3"
+
+# For OmniRoute (proxies Groq):
+url = "http://YOUR_OMNIROUTE:20128/v1/audio/transcriptions"
+api_key = "sk-your-omniroute-key"
+model = "groq/whisper-large-v3"  # note: groq/ prefix required for OmniRoute
+```
