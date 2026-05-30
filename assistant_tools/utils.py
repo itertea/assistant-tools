@@ -50,25 +50,29 @@ def emit_result(result: CommandResult) -> None:
         "has_protected_content", "mentioned", "outgoing",
     }
 
-    def _strip_nulls(obj: Any, depth: int = 0) -> Any:
+    def _strip_nulls(obj: Any) -> Any:
         if isinstance(obj, dict):
             return {
-                k: _strip_nulls(v, depth + 1)
+                k: _strip_nulls(v)
                 for k, v in obj.items()
                 if not (v is None and k in _OMIT_WHEN_NULL)
             }
         if isinstance(obj, list):
-            return [_strip_nulls(i, depth + 1) for i in obj]
+            return [_strip_nulls(i) for i in obj]
         return obj
 
-    payload: dict[str, Any] = _strip_nulls({
+    is_full: bool = bool((result.meta or {}).get("full"))
+
+    payload: dict[str, Any] = {
         "ok": result.ok,
         "command": result.command,
         "provider": result.provider,
         "data": result.data,
         "error": result.error,
         "meta": result.meta,
-    })
+    }
+    if not is_full:
+        payload = _strip_nulls(payload)
     json.dump(payload, sys.stdout, ensure_ascii=False)
     sys.stdout.write("\n")
 
