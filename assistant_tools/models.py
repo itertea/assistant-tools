@@ -14,7 +14,7 @@ class NetworkConfig:
 
 @dataclass(slots=True)
 class SttConfig:
-    url: str = "http://159.195.51.237:20128/v1/audio/transcriptions"
+    url: str = "https://api.groq.com/openai/v1/audio/transcriptions"
     model: str = "whisper-large-v3"
     api_key: str = ""
     language: str = ""
