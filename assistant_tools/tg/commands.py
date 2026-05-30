@@ -400,6 +400,7 @@ async def get_messages(
 async def send_message(
     config: ResolvedTgConfig, peer: str, text: str, reply_to_message_id: int | None, full: bool, parse_mode: str | None = None
 ) -> CommandResult:
+    from assistant_tools.tg.sent_db import record_sent
     async with telegram_client(config) as client:
         entity: Any = await _resolve_peer_entity(client, peer)
         kwargs: dict[str, Any] = {}
@@ -408,6 +409,10 @@ async def send_message(
         if parse_mode:
             kwargs["parse_mode"] = parse_mode
         message: Any = await client.send_message(entity, text, **kwargs)
+        peer_id = getattr(entity, "id", None) or getattr(getattr(entity, "user_id", None), "id", 0)
+        msg_id = getattr(message, "id", 0)
+        if peer_id and msg_id:
+            record_sent(config, int(peer_id), int(msg_id))
         return _ok(
             "tg.send",
             {"message": normalize_message(message, chat_entity=entity, full=full)},
@@ -814,6 +819,62 @@ async def watch(
                     _sys.stdout.flush()
 
             await asyncio.sleep(1.5)
+
+
+async def forward_message(
+    config: ResolvedTgConfig, from_peer: str, to_peer: str, message_ids: list[int]
+) -> CommandResult:
+    async with telegram_client(config) as client:
+        from_entity: Any = await _resolve_peer_entity(client, from_peer)
+        to_entity: Any = await _resolve_peer_entity(client, to_peer)
+        messages: Any = await client.forward_messages(to_entity, message_ids, from_entity)
+        items: list[dict[str, Any]] = []
+        for msg in (messages if isinstance(messages, list) else [messages]):
+            if msg:
+                items.append(normalize_message(msg, chat_entity=to_entity, full=False))
+        return _ok(
+            "tg.forward",
+            {"messages": items},
+            {"from_peer": from_peer, "to_peer": to_peer, "message_ids": message_ids, "profile": config.profile},
+        )
+
+
+async def edit_message(
+    config: ResolvedTgConfig, peer: str, message_id: int, text: str, parse_mode: str | None = None
+) -> CommandResult:
+    from assistant_tools.tg.sent_db import is_own_message
+    async with telegram_client(config) as client:
+        entity: Any = await _resolve_peer_entity(client, peer)
+        peer_id: int = int(getattr(entity, "id", 0) or 0)
+        if not is_own_message(config, peer_id, message_id):
+            raise _error("not_own_message", "Can only edit messages sent by kit", exit_code=3)
+        kwargs: dict[str, Any] = {}
+        if parse_mode:
+            kwargs["parse_mode"] = parse_mode
+        message: Any = await client.edit_message(entity, message_id, text, **kwargs)
+        return _ok(
+            "tg.edit",
+            {"message": normalize_message(message, chat_entity=entity, full=False)},
+            {"peer": peer, "message_id": message_id, "profile": config.profile},
+        )
+
+
+async def delete_message(
+    config: ResolvedTgConfig, peer: str, message_ids: list[int]
+) -> CommandResult:
+    from assistant_tools.tg.sent_db import is_own_message
+    async with telegram_client(config) as client:
+        entity: Any = await _resolve_peer_entity(client, peer)
+        peer_id: int = int(getattr(entity, "id", 0) or 0)
+        for mid in message_ids:
+            if not is_own_message(config, peer_id, mid):
+                raise _error("not_own_message", f"Can only delete messages sent by kit (message_id={mid})", exit_code=3)
+        await client.delete_messages(entity, message_ids)
+        return _ok(
+            "tg.delete",
+            {"deleted": message_ids},
+            {"peer": peer, "message_ids": message_ids, "profile": config.profile},
+        )
 
 
 async def media_info(
