@@ -353,6 +353,10 @@ def build_parser() -> argparse.ArgumentParser:
         "--model", default="BAAI/bge-m3-multi", help="Embeddings model (embeddings mode)",
     )
 
+    tg_subparsers.add_parser("daemon-start", help="Start the Telegram daemon (persistent connection)")
+    tg_subparsers.add_parser("daemon-stop", help="Stop the Telegram daemon")
+    tg_subparsers.add_parser("daemon-status", help="Check if daemon is running")
+
     return parser
 
 
@@ -867,6 +871,21 @@ def dispatch(
                     tg_config, args.source_peer, args.message_id, args.target_peer, args.full
                 )
             )
+        if args.tg_command == "daemon-start":
+            from assistant_tools.tg.daemon import run_daemon
+            import asyncio
+            asyncio.run(run_daemon(tg_config))
+            return CommandResult(ok=True, command="tg.daemon-start", provider="telethon", data={}, meta={})
+        if args.tg_command == "daemon-stop":
+            from assistant_tools.tg.daemon import SOCKET_PATH
+            if SOCKET_PATH.exists():
+                SOCKET_PATH.unlink()
+                # The daemon will crash on next accept — good enough
+            return CommandResult(ok=True, command="tg.daemon-stop", provider="telethon", data={"stopped": True}, meta={})
+        if args.tg_command == "daemon-status":
+            from assistant_tools.tg.daemon import SOCKET_PATH
+            running = SOCKET_PATH.exists()
+            return CommandResult(ok=True, command="tg.daemon-status", provider="telethon", data={"running": running, "socket": str(SOCKET_PATH)}, meta={})
     raise AssistantToolsError(
         f"Unknown command: {args.command}",
         error_type="unknown_command",
