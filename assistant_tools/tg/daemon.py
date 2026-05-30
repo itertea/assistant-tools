@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from telethon import TelegramClient
+from telethon.tl.types import InputPeerSelf
 
 from assistant_tools.tg.client import make_client, telegram_client
 from assistant_tools.tg.commands import (
