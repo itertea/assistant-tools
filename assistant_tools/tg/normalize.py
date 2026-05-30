@@ -233,6 +233,23 @@ def _excerpt_text(text: str | None, max_chars: int = 220) -> str | None:
     return collapsed[: max_chars - 1] + "…"
 
 
+def _extract_reactions(message: Message) -> list[str] | None:
+    """Extract reaction emojis from message."""
+    reactions = getattr(message, "reactions", None)
+    if not reactions:
+        return None
+    results = getattr(reactions, "results", None)
+    if not results:
+        return None
+    emojis: list[str] = []
+    for r in results:
+        reaction = getattr(r, "reaction", None)
+        emoticon = getattr(reaction, "emoticon", None)
+        if emoticon:
+            emojis.append(emoticon)
+    return emojis or None
+
+
 def normalize_message(
     message: Message, *, chat_entity: Any | None = None, full: bool = False
 ) -> dict[str, Any]:
@@ -262,6 +279,9 @@ def normalize_message(
         }
         if action_type:
             result["action"] = action_type
+        reactions = _extract_reactions(message)
+        if reactions:
+            result["reactions"] = reactions
         return result
     result = {
         "chat": normalize_chat(chat),
