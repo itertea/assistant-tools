@@ -603,9 +603,20 @@ async def send_voice(
 
 
 async def react(config: ResolvedTgConfig, peer: str, message_id: int, emoji: str) -> CommandResult:
-    raise _error(
-        "unsupported", f"Telegram reactions are not implemented yet for Telethon backend: {emoji}"
-    )
+    from telethon.tl.functions.messages import SendReactionRequest
+    from telethon.tl.types import ReactionEmoji
+    async with telegram_client(config) as client:
+        entity: Any = await _resolve_peer_entity(client, peer)
+        await client(SendReactionRequest(
+            peer=entity,
+            msg_id=message_id,
+            reaction=[ReactionEmoji(emoticon=emoji)],
+        ))
+        return _ok(
+            "tg.react",
+            {"peer": peer, "message_id": message_id, "emoji": emoji},
+            {"peer": peer, "message_id": message_id, "profile": config.profile},
+        )
 
 
 async def search_messages(
