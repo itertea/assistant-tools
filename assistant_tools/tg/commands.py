@@ -32,9 +32,10 @@ from assistant_tools.tg.normalize import normalize_dialog
 from assistant_tools.tg.normalize import normalize_media
 from assistant_tools.tg.normalize import normalize_message
 from assistant_tools.tg.normalize import normalize_user
+
 from assistant_tools.providers import deepinfra as deepinfra_provider
-from assistant_tools.utils import require_env
 from assistant_tools.utils import AssistantToolsError
+from assistant_tools.utils import require_env
 
 
 def _ok(command: str, data: dict[str, Any], meta: dict[str, Any]) -> CommandResult:
@@ -584,12 +585,35 @@ async def find_dialog(
     *,
     query: str,
     limit: int,
+) -> CommandResult:
+    from telethon.tl.functions.contacts import SearchRequest
+
+    async with telegram_client(config) as client:
+        result: Any = await client(SearchRequest(q=query, limit=limit))
+        matches: list[dict[str, Any]] = []
+        for user in (result.users or []):
+            matches.append({"type": "user", "chat": normalize_chat(user)})
+        for chat in (result.chats or []):
+            matches.append({"type": "chat", "chat": normalize_chat(chat)})
+
+    return _ok(
+        "tg.find-dialog",
+        {"matches": matches},
+        {"query": query, "limit": limit, "profile": config.profile, "method": "telegram_search"},
+    )
+
+
+async def find_dialog_embeddings(
+    config: ResolvedTgConfig,
+    *,
+    query: str,
+    limit: int,
     top: int,
     model: str,
     timeout_seconds: float,
     proxy: str | None,
 ) -> CommandResult:
-    # Pull dialogs via Telethon, normalize to compact chat objects.
+    """Find dialog using DeepInfra embeddings (requires DEEPINFRA_TOKEN)."""
     async with telegram_client(config) as client:
         items: list[dict[str, Any]] = []
         async for dialog in client.iter_dialogs(limit=limit):
@@ -618,7 +642,7 @@ async def find_dialog(
     return _ok(
         "tg.find-dialog",
         {"matches": matches},
-        {"query": query, "limit": limit, "top": top, "model": model, "profile": config.profile},
+        {"query": query, "limit": limit, "top": top, "model": model, "profile": config.profile, "method": "embeddings"},
     )
 
 
