@@ -163,7 +163,9 @@ async def handle_client(reader: asyncio.StreamReader, writer: asyncio.StreamWrit
                 # Wait for response (infinite if timeout=0)
                 import time
                 deadline = (time.time() + timeout) if timeout > 0 else None
-                while deadline is None or time.time() < deadline:
+                while True:
+                    if deadline is not None and time.time() >= deadline:
+                        break
                     await asyncio.sleep(1.5)
                     messages_raw = await client.get_messages(entity, limit=10)
                     for msg in reversed(list(messages_raw or [])):
