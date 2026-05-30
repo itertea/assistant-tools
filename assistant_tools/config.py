@@ -37,6 +37,25 @@ def load_config(config_path: Path | None = None) -> AppConfig:
     raw: dict[str, Any] = {}
     if resolved_path.exists():
         raw = tomllib.loads(resolved_path.read_text())
+    else:
+        # Create default config on first run
+        resolved_path.parent.mkdir(parents=True, exist_ok=True)
+        resolved_path.write_text(
+            '# kit configuration\n'
+            '# Docs: https://github.com/kyoukisu/assistant-tools\n\n'
+            '[tg]\n'
+            'api_id = 2040\n'
+            'api_hash = "b18441a1ff607e10a989891a5462e627"\n\n'
+            '[stt]\n'
+            '# url = "https://api.groq.com/openai/v1/audio/transcriptions"\n'
+            '# api_key = "gsk_your_groq_key"\n'
+            '# model = "whisper-large-v3"\n'
+            '#\n'
+            '# For OmniRoute:\n'
+            '# url = "http://YOUR_OMNIROUTE:20128/v1/audio/transcriptions"\n'
+            '# api_key = "sk-your-omniroute-key"\n'
+            '# model = "groq/whisper-large-v3"\n'
+        )
 
     network_config: NetworkConfig = NetworkConfig(**_section(raw, "network"))
     stt_config: SttConfig = SttConfig(**_section(raw, "stt"))
