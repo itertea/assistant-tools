@@ -315,6 +315,12 @@ def build_parser() -> argparse.ArgumentParser:
     tg_forward.add_argument("to_peer", help="Destination peer")
     tg_forward.add_argument("message_ids", nargs="+", type=int, help="Message IDs to forward")
 
+    tg_ask = tg_subparsers.add_parser("ask", help="Send a question and wait for user's reply")
+    tg_ask.add_argument("peer", help="Target peer (usually 'me' for Saved Messages)")
+    tg_ask.add_argument("text", nargs="?", default=None, help="Question text (omit to just collect pending replies)")
+    tg_ask.add_argument("--timeout", type=int, default=300, help="Seconds to wait for reply (default 300)")
+    tg_ask.add_argument("--parse-mode", default=None, choices=["md", "html"], help="Parse mode for question")
+
     tg_edit = tg_subparsers.add_parser("edit", help="Edit a message sent by kit")
     tg_edit.add_argument("peer", help="Target peer")
     tg_edit.add_argument("message_id", type=int, help="Message ID to edit")
@@ -768,6 +774,15 @@ def _build_daemon_request(args: Any) -> dict[str, Any] | None:
         return {"cmd": "edit", "peer": args.peer, "message_id": args.message_id, "text": args.text, "parse_mode": getattr(args, "parse_mode", None)}
     if cmd == "delete":
         return {"cmd": "delete", "peer": args.peer, "message_ids": args.message_ids}
+    if cmd == "ask":
+        import os
+        session_id = os.environ.get("KIT_SESSION_ID")
+        if not session_id:
+            try:
+                session_id = os.ttyname(0)
+            except OSError:
+                session_id = f"pid-{os.getppid()}"
+        return {"cmd": "ask", "peer": args.peer, "text": args.text, "timeout": args.timeout, "parse_mode": getattr(args, "parse_mode", None), "session_id": session_id}
     # Commands not yet supported by daemon — fall through to direct connection
     return None
 

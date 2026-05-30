@@ -109,6 +109,70 @@ async def handle_client(reader: asyncio.StreamReader, writer: asyncio.StreamWrit
             await client.delete_messages(entity, request["message_ids"])
             result = {"ok": True, "data": {"deleted": request["message_ids"]}}
 
+        elif cmd == "ask":
+            from assistant_tools.tg.sent_db import record_ask, get_last_ask, record_sent, is_own_message
+            peer = request["peer"]
+            text = request.get("text")
+            timeout = request.get("timeout", 300)
+            session_id = request.get("session_id", "default")
+            entity = await _resolve_peer_entity(client, peer)
+            peer_id = await _get_peer_id(client, entity)
+
+            # Check for unreads from previous ask in this session
+            last_ask_id = get_last_ask(config, peer_id, session_id)
+            baseline_id = last_ask_id
+
+            # Send question if provided
+            if text:
+                kwargs_ask: dict[str, Any] = {}
+                if request.get("parse_mode"):
+                    kwargs_ask["parse_mode"] = request["parse_mode"]
+                sent_msg = await client.send_message(entity, text, **kwargs_ask)
+                msg_id = int(getattr(sent_msg, "id", 0) or 0)
+                if peer_id and msg_id:
+                    record_sent(config, peer_id, msg_id)
+                    record_ask(config, peer_id, msg_id, session_id)
+                    baseline_id = msg_id
+
+            def _is_user_reply(msg: Any, mid: int) -> bool:
+                """Check if message is a user reply (not sent by kit)."""
+                if mid <= baseline_id:
+                    return False
+                # Skip messages sent by kit
+                if is_own_message(config, peer_id, mid):
+                    return False
+                return True
+
+            # Collect any messages already there (sent between asks)
+            responses: list[dict[str, Any]] = []
+            messages_raw = await client.get_messages(entity, limit=50)
+            for msg in reversed(list(messages_raw or [])):
+                mid = int(getattr(msg, "id", 0) or 0)
+                if _is_user_reply(msg, mid):
+                    responses.append(normalize_message(msg, chat_entity=entity))
+
+            if responses:
+                result = {"ok": True, "data": {"responses": responses}}
+            else:
+                # Wait for response
+                import time
+                deadline = time.time() + timeout
+                while time.time() < deadline:
+                    await asyncio.sleep(1.5)
+                    messages_raw = await client.get_messages(entity, limit=10)
+                    for msg in reversed(list(messages_raw or [])):
+                        mid = int(getattr(msg, "id", 0) or 0)
+                        if _is_user_reply(msg, mid):
+                            responses.append(normalize_message(msg, chat_entity=entity))
+                            baseline_id = max(baseline_id, mid)
+                    if responses:
+                        break
+
+                if responses:
+                    result = {"ok": True, "data": {"responses": responses}}
+                else:
+                    result = {"ok": False, "error": f"No response within {timeout}s"}
+
         writer.write(json.dumps(result, ensure_ascii=False).encode())
         await writer.drain()
     except Exception as e:

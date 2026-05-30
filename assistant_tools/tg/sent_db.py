@@ -42,3 +42,34 @@ def is_own_message(config: ResolvedTgConfig, peer_id: int, message_id: int) -> b
     ).fetchone()
     conn.close()
     return row is not None
+
+
+def _ensure_ask_table(conn: sqlite3.Connection) -> None:
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS ask ("
+        "  peer_id INTEGER, session_id TEXT, last_ask_message_id INTEGER,"
+        "  PRIMARY KEY (peer_id, session_id)"
+        ")"
+    )
+
+
+def record_ask(config: ResolvedTgConfig, peer_id: int, message_id: int, session_id: str = "default") -> None:
+    conn = _get_conn(config)
+    _ensure_ask_table(conn)
+    conn.execute(
+        "INSERT OR REPLACE INTO ask (peer_id, session_id, last_ask_message_id) VALUES (?, ?, ?)",
+        (peer_id, session_id, message_id),
+    )
+    conn.commit()
+    conn.close()
+
+
+def get_last_ask(config: ResolvedTgConfig, peer_id: int, session_id: str = "default") -> int:
+    conn = _get_conn(config)
+    _ensure_ask_table(conn)
+    row = conn.execute(
+        "SELECT last_ask_message_id FROM ask WHERE peer_id = ? AND session_id = ?",
+        (peer_id, session_id),
+    ).fetchone()
+    conn.close()
+    return row[0] if row else 0
