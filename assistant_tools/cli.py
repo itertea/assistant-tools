@@ -293,6 +293,12 @@ def build_parser() -> argparse.ArgumentParser:
     )
     tg_wait_next.add_argument("--full", action="store_true", help="Return fuller message object")
 
+    tg_ask = tg_subparsers.add_parser("ask", help="Send a question and wait for user's reply")
+    tg_ask.add_argument("peer", help="Target peer (usually 'me' for Saved Messages)")
+    tg_ask.add_argument("text", nargs="?", default=None, help="Question text (omit to just collect pending replies)")
+    tg_ask.add_argument("--timeout", type=int, default=0, help="Seconds to wait for reply (0 = infinite)")
+    tg_ask.add_argument("--parse-mode", default=None, choices=["md", "html"], help="Parse mode for question")
+
     tg_media_info = tg_subparsers.add_parser("media-info", help="Show media metadata")
     tg_media_info.add_argument("peer", help="Target peer")
     tg_media_info.add_argument("message_id", type=int, help="Message id")
