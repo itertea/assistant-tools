@@ -490,17 +490,41 @@ async def send_photo(
     input_path: Path = _ensure_local_file(path_value)
     async with telegram_client(config) as client:
         entity: Any = await _resolve_peer_entity(client, peer)
-        kwargs: dict[str, Any] = {}
-        if force_video or input_path.suffix.lower() in (".mp4", ".mkv", ".avi", ".mov", ".webm"):
-            kwargs["supports_streaming"] = True
+
+        is_video = force_video and input_path.suffix.lower() in (".mp4", ".mkv", ".avi", ".mov", ".webm")
+        upload_path = input_path
+
+        if is_video:
+            import subprocess, re, tempfile
+            from imageio_ffmpeg import get_ffmpeg_exe
+            ffmpeg = get_ffmpeg_exe()
+
+            # Check if file has audio
+            probe = subprocess.run(
+                [ffmpeg, "-i", str(input_path)], capture_output=True, text=True, timeout=30,
+            )
+            has_audio = "Audio:" in probe.stderr
+
+            if not has_audio:
+                # Add silent audio track so Telegram doesn't mark as gif
+                tmp = tempfile.NamedTemporaryFile(suffix=f"_{input_path.name}", delete=False)
+                tmp.close()
+                subprocess.run(
+                    [ffmpeg, "-y", "-i", str(input_path), "-f", "lavfi", "-i", "anullsrc=r=44100:cl=mono",
+                     "-c:v", "copy", "-c:a", "aac", "-shortest", tmp.name],
+                    capture_output=True, timeout=120,
+                )
+                upload_path = Path(tmp.name)
+
         message: Any = await client.send_file(
-            entity,
-            str(input_path),
-            caption=caption,
-            reply_to=reply_to_message_id,
-            force_document=False,
-            **kwargs,
+            entity, str(upload_path), caption=caption,
+            reply_to=reply_to_message_id, force_document=False,
+            supports_streaming=True,
         )
+
+        # Cleanup temp file
+        if upload_path != input_path:
+            upload_path.unlink(missing_ok=True)
         peer_id = await _get_peer_id(client, entity)
         msg_id = int(getattr(message, "id", 0) or 0)
         if peer_id and msg_id:
