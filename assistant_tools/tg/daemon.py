@@ -167,7 +167,11 @@ async def handle_client(reader: asyncio.StreamReader, writer: asyncio.StreamWrit
                 msg_id = int(getattr(sent_msg, "id", 0) or 0)
                 if peer_id and msg_id:
                     record_sent(config, peer_id, msg_id)
-                    record_ask(config, peer_id, msg_id, session_id)
+                    # Update ask baseline to max of ask_id and last collected response
+                    max_seen = msg_id
+                    if responses:
+                        max_seen = max(msg_id, max(r.get("message_id", 0) for r in responses))
+                    record_ask(config, peer_id, max_seen, session_id)
 
             # If no text and no previous ask — nothing to wait for
             if not text and baseline_id == 0:
@@ -228,6 +232,10 @@ async def handle_client(reader: asyncio.StreamReader, writer: asyncio.StreamWrit
                             pass
 
                 if responses:
+                    # Update baseline so next ask doesn't re-read these
+                    max_resp_id = max(r.get("message_id", 0) for r in responses)
+                    if peer_id and max_resp_id:
+                        record_ask(config, peer_id, max_resp_id, session_id)
                     result = {"ok": True, "data": {"responses": responses}}
                 else:
                     result = {"ok": False, "error": f"No response within {timeout}s"}
