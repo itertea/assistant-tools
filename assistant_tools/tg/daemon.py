@@ -250,8 +250,12 @@ async def handle_client(reader: asyncio.StreamReader, writer: asyncio.StreamWrit
                 while True:
                     if deadline is not None and time.time() >= deadline:
                         break
-                    await asyncio.sleep(1.5)
-                    messages_raw = await client.get_messages(entity, limit=10)
+                    await asyncio.sleep(3)
+                    try:
+                        messages_raw = await client.get_messages(entity, limit=10)
+                    except Exception:
+                        await asyncio.sleep(5)
+                        continue
                     for msg in reversed(list(messages_raw or [])):
                         mid = int(getattr(msg, "id", 0) or 0)
                         if _is_user_reply(msg, mid):
