@@ -175,6 +175,14 @@ def build_parser() -> argparse.ArgumentParser:
         help="paplay volume for --play (PulseAudio scale, e.g. 45000)",
     )
 
+    config_parser = subparsers.add_parser("config", help="Show or edit kit configuration")
+    config_subparsers = config_parser.add_subparsers(dest="config_command")
+    config_subparsers.add_parser("show", help="Show current config")
+    config_set = config_subparsers.add_parser("set", help="Set a config value")
+    config_set.add_argument("key", help="Config key (e.g. tg.api_id)")
+    config_set.add_argument("value", help="Value to set")
+    config_subparsers.add_parser("path", help="Show config file path")
+
     tg_parser = subparsers.add_parser("tg", help="Telegram CLI via Telethon")
     tg_parser.add_argument(
         "--profile",
@@ -750,6 +758,17 @@ def run_tg_speak(
     )
 
 
+def _toml_value(val: str) -> str:
+    """Format value for TOML."""
+    try:
+        return str(int(val))
+    except ValueError:
+        pass
+    if val.lower() in ("true", "false"):
+        return val.lower()
+    return f'"{val}"'
+
+
 def _run_tg_stt(args: Any, config: AppConfig, tg_config: Any) -> CommandResult:
     """Download voice/audio message and transcribe."""
     import asyncio as _asyncio
@@ -887,6 +906,54 @@ def dispatch(
         return run_video(args, config, verbose, config_path)
     if args.command == "tts":
         return run_tts(args, config, verbose, config_path)
+    if args.command == "config":
+        from assistant_tools.config import DEFAULT_CONFIG_PATH
+        config_path_resolved = (config_path or DEFAULT_CONFIG_PATH).expanduser()
+        if not hasattr(args, "config_command") or args.config_command == "show" or args.config_command is None:
+            if config_path_resolved.exists():
+                print(config_path_resolved.read_text())
+            else:
+                print(f"No config file at {config_path_resolved}")
+            return CommandResult(ok=True, command="config.show", provider="local", data={}, error=None, meta={"path": str(config_path_resolved)})
+        if args.config_command == "path":
+            print(str(config_path_resolved))
+            return CommandResult(ok=True, command="config.path", provider="local", data={"path": str(config_path_resolved)}, error=None, meta={})
+        if args.config_command == "set":
+            import tomllib, re as _re
+            content = config_path_resolved.read_text() if config_path_resolved.exists() else ""
+            section, _, key = args.key.rpartition(".")
+            if not section:
+                section, key = "default", args.key
+            # Line-by-line: find section, replace or append key
+            lines = content.splitlines(keepends=True)
+            in_section = False
+            replaced = False
+            section_found = False
+            for i, line in enumerate(lines):
+                stripped = line.strip()
+                if stripped == f"[{section}]":
+                    in_section = True
+                    section_found = True
+                    continue
+                if stripped.startswith("[") and stripped.endswith("]"):
+                    if in_section and not replaced:
+                        # Insert before next section
+                        lines.insert(i, f"{key} = {_toml_value(args.value)}\n")
+                        replaced = True
+                    in_section = False
+                    continue
+                if in_section and _re.match(rf"^{_re.escape(key)}\s*=", stripped):
+                    lines[i] = f"{key} = {_toml_value(args.value)}\n"
+                    replaced = True
+            if not replaced:
+                if not section_found:
+                    lines.append(f"\n[{section}]\n")
+                lines.append(f"{key} = {_toml_value(args.value)}\n")
+            content = "".join(lines)
+            config_path_resolved.parent.mkdir(parents=True, exist_ok=True)
+            config_path_resolved.write_text(content)
+            print(f"Set {args.key} = {args.value}")
+            return CommandResult(ok=True, command="config.set", provider="local", data={"key": args.key, "value": args.value}, error=None, meta={})
     if args.command == "tg":
         tg_config = resolve_tg_config(config, args.profile)
 
