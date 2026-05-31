@@ -881,6 +881,14 @@ def _build_daemon_request(args: Any) -> dict[str, Any] | None:
                 # Use hash of cwd — stable across restarts in same project
                 session_id = "s_" + hashlib.md5(os.getcwd().encode()).hexdigest()[:8]
         return {"cmd": "ask", "peer": args.peer, "text": args.text, "timeout": args.timeout, "parse_mode": getattr(args, "parse_mode", None), "session_id": session_id}
+    if cmd == "send-file":
+        return {"cmd": "send_file", "peer": args.peer, "path": str(args.path), "caption": args.caption, "reply_to": args.reply_to}
+    if cmd in ("send-photo", "send-media"):
+        if hasattr(args, "path") and len(args.path) == 1:
+            return {"cmd": "send_photo", "peer": args.peer, "path": str(args.path[0]), "caption": args.caption, "reply_to": args.reply_to}
+        return None  # albums fall through
+    if cmd == "send-voice":
+        return {"cmd": "send_voice", "peer": args.peer, "path": str(args.path), "caption": args.caption, "reply_to": args.reply_to}
     # Commands not yet supported by daemon — fall through to direct connection
     return None
 

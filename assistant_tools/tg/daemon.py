@@ -129,6 +129,53 @@ async def handle_client(reader: asyncio.StreamReader, writer: asyncio.StreamWrit
             await client.delete_messages(entity, request["message_ids"])
             result = {"ok": True, "data": {"deleted": request["message_ids"]}}
 
+        elif cmd == "send_file":
+            from assistant_tools.tg.sent_db import record_sent
+            peer = request["peer"]
+            path = request["path"]
+            entity = await _resolve_peer_entity(client, peer)
+            message = await client.send_file(
+                entity, path, caption=request.get("caption"),
+                reply_to=request.get("reply_to"), force_document=True,
+            )
+            peer_id = await _get_peer_id(client, entity)
+            msg_id = int(getattr(message, "id", 0) or 0)
+            if peer_id and msg_id:
+                record_sent(config, peer_id, msg_id)
+            result = {"ok": True, "data": {"message": normalize_message(message, chat_entity=entity)}}
+
+        elif cmd == "send_photo":
+            from assistant_tools.tg.sent_db import record_sent
+            peer = request["peer"]
+            path = request["path"]
+            entity = await _resolve_peer_entity(client, peer)
+            message = await client.send_file(
+                entity, path, caption=request.get("caption"),
+                reply_to=request.get("reply_to"), force_document=False,
+                supports_streaming=True,
+            )
+            peer_id = await _get_peer_id(client, entity)
+            msg_id = int(getattr(message, "id", 0) or 0)
+            if peer_id and msg_id:
+                record_sent(config, peer_id, msg_id)
+            result = {"ok": True, "data": {"message": normalize_message(message, chat_entity=entity)}}
+
+        elif cmd == "send_voice":
+            from assistant_tools.tg.sent_db import record_sent
+            peer = request["peer"]
+            path = request["path"]
+            entity = await _resolve_peer_entity(client, peer)
+            import mimetypes
+            message = await client.send_file(
+                entity, path, caption=request.get("caption"),
+                reply_to=request.get("reply_to"), voice_note=True,
+            )
+            peer_id = await _get_peer_id(client, entity)
+            msg_id = int(getattr(message, "id", 0) or 0)
+            if peer_id and msg_id:
+                record_sent(config, peer_id, msg_id)
+            result = {"ok": True, "data": {"message": normalize_message(message, chat_entity=entity)}}
+
         elif cmd == "ask":
             from assistant_tools.tg.sent_db import record_ask, get_last_ask, record_sent, is_own_message
             peer = request["peer"]
