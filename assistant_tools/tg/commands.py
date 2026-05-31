@@ -408,15 +408,17 @@ async def get_messages(
 
 
 async def send_message(
-    config: ResolvedTgConfig, peer: str, text: str, reply_to_message_id: int | None, full: bool
+    config: ResolvedTgConfig, peer: str, text: str, reply_to_message_id: int | None, full: bool, parse_mode: str | None = None
 ) -> CommandResult:
     from assistant_tools.tg.sent_db import record_sent
     async with telegram_client(config) as client:
         entity: Any = await _resolve_peer_entity(client, peer)
-        if reply_to_message_id is None:
-            message: Any = await client.send_message(entity, text)
-        else:
-            message = await client.send_message(entity, text, reply_to=reply_to_message_id)
+        kwargs: dict[str, Any] = {}
+        if reply_to_message_id is not None:
+            kwargs["reply_to"] = reply_to_message_id
+        if parse_mode:
+            kwargs["parse_mode"] = parse_mode
+        message: Any = await client.send_message(entity, text, **kwargs)
         peer_id = await _get_peer_id(client, entity)
         msg_id = getattr(message, "id", 0)
         if peer_id and msg_id:
@@ -429,6 +431,7 @@ async def send_message(
                 "reply_to_message_id": reply_to_message_id,
                 "profile": config.profile,
                 "full": full,
+                "parse_mode": parse_mode,
             },
         )
 
@@ -480,18 +483,50 @@ async def send_photo(
     caption: str | None,
     reply_to_message_id: int | None,
     full: bool,
+    force_video: bool = False,
 ) -> CommandResult:
     from assistant_tools.tg.sent_db import record_sent
     input_path: Path = _ensure_local_file(path_value)
     async with telegram_client(config) as client:
         entity: Any = await _resolve_peer_entity(client, peer)
+
+        is_video = force_video and input_path.suffix.lower() in (".mp4", ".mkv", ".avi", ".mov", ".webm")
+        upload_path = input_path
+
+        if is_video:
+            import subprocess, tempfile
+            from imageio_ffmpeg import get_ffmpeg_exe
+            ffmpeg = get_ffmpeg_exe()
+
+            # Check if file has audio
+            probe = subprocess.run(
+                [ffmpeg, "-i", str(input_path)], capture_output=True, text=True, timeout=30,
+            )
+            has_audio = "Audio:" in probe.stderr
+
+            if not has_audio:
+                # Add silent audio track so Telegram doesn't mark as gif
+                tmp = tempfile.NamedTemporaryFile(suffix=f"_{input_path.name}", delete=False)
+                tmp.close()
+                result_ff = subprocess.run(
+                    [ffmpeg, "-y", "-i", str(input_path), "-f", "lavfi", "-i", "anullsrc=r=44100:cl=mono",
+                     "-c:v", "copy", "-c:a", "aac", "-shortest", tmp.name],
+                    capture_output=True, timeout=120,
+                )
+                if result_ff.returncode == 0:
+                    upload_path = Path(tmp.name)
+                else:
+                    Path(tmp.name).unlink(missing_ok=True)
+
         message: Any = await client.send_file(
-            entity,
-            str(input_path),
-            caption=caption,
-            reply_to=reply_to_message_id,
-            force_document=False,
+            entity, str(upload_path), caption=caption,
+            reply_to=reply_to_message_id, force_document=False,
+            supports_streaming=True,
         )
+
+        # Cleanup temp file
+        if upload_path != input_path:
+            upload_path.unlink(missing_ok=True)
         peer_id = await _get_peer_id(client, entity)
         msg_id = int(getattr(message, "id", 0) or 0)
         if peer_id and msg_id:
@@ -505,6 +540,79 @@ async def send_photo(
             {
                 "peer": peer,
                 "path": str(input_path),
+                "caption": caption,
+                "reply_to_message_id": reply_to_message_id,
+                "profile": config.profile,
+                "full": full,
+            },
+        )
+
+
+async def send_album(
+    config: ResolvedTgConfig,
+    peer: str,
+    paths: list[str],
+    caption: str | None,
+    reply_to_message_id: int | None,
+    full: bool,
+    force_video: bool = False,
+) -> CommandResult:
+    from assistant_tools.tg.sent_db import record_sent
+    input_paths: list[Path] = [_ensure_local_file(p) for p in paths]
+
+    # Add silent audio to videos without sound (prevents gif conversion)
+    upload_paths: list[Path] = []
+    temp_files: list[Path] = []
+    if force_video:
+        import subprocess, tempfile
+        from imageio_ffmpeg import get_ffmpeg_exe
+        ffmpeg = get_ffmpeg_exe()
+        for p in input_paths:
+            if p.suffix.lower() in (".mp4", ".mkv", ".avi", ".mov", ".webm"):
+                probe = subprocess.run([ffmpeg, "-i", str(p)], capture_output=True, text=True, timeout=30)
+                if "Audio:" not in probe.stderr:
+                    tmp = tempfile.NamedTemporaryFile(suffix=f"_{p.name}", delete=False)
+                    tmp.close()
+                    r_ff = subprocess.run(
+                        [ffmpeg, "-y", "-i", str(p), "-f", "lavfi", "-i", "anullsrc=r=44100:cl=mono",
+                         "-c:v", "copy", "-c:a", "aac", "-shortest", tmp.name],
+                        capture_output=True, timeout=120,
+                    )
+                    if r_ff.returncode == 0:
+                        upload_paths.append(Path(tmp.name))
+                        temp_files.append(Path(tmp.name))
+                    else:
+                        Path(tmp.name).unlink(missing_ok=True)
+                        upload_paths.append(p)
+                    continue
+            upload_paths.append(p)
+    else:
+        upload_paths = input_paths
+
+    async with telegram_client(config) as client:
+        entity: Any = await _resolve_peer_entity(client, peer)
+        messages: Any = await client.send_file(
+            entity,
+            [str(p) for p in upload_paths],
+            caption=caption,
+            reply_to=reply_to_message_id,
+        )
+        peer_id = await _get_peer_id(client, entity)
+        items: list[dict[str, Any]] = []
+        for msg in (messages if isinstance(messages, list) else [messages]):
+            msg_id = int(getattr(msg, "id", 0) or 0)
+            if peer_id and msg_id:
+                record_sent(config, peer_id, msg_id)
+            items.append(normalize_message(msg, chat_entity=entity, full=full))
+        # Cleanup temp files
+        for tf in temp_files:
+            tf.unlink(missing_ok=True)
+        return _ok(
+            "tg.send-album",
+            {"messages": items},
+            {
+                "peer": peer,
+                "paths": [str(p) for p in input_paths],
                 "caption": caption,
                 "reply_to_message_id": reply_to_message_id,
                 "profile": config.profile,

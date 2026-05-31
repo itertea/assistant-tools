@@ -11,6 +11,7 @@ requires-python = ">=3.11"
 dependencies = [
   "cryptg>=0.5.2",
   "httpx>=0.28.1",
+  "imageio-ffmpeg>=0.5.1",
   "python-socks[asyncio]>=2.8.1",
   "soundfile>=0.13.1",
   "socksio>=1.0.0",

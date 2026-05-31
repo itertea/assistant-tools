@@ -219,6 +219,7 @@ def build_parser() -> argparse.ArgumentParser:
     tg_send.add_argument("peer", help="Target peer")
     tg_send.add_argument("text", help="Message text")
     tg_send.add_argument("--reply-to", type=int, default=None, help="Reply target message id")
+    tg_send.add_argument("--parse-mode", default=None, choices=["md", "html"], help="Parse mode: md or html")
     tg_send.add_argument("--full", action="store_true", help="Return fuller sent message object")
 
     tg_send_file = tg_subparsers.add_parser("send-file", help="Send local file as document")
@@ -231,15 +232,25 @@ def build_parser() -> argparse.ArgumentParser:
     )
 
     tg_send_photo = tg_subparsers.add_parser(
-        "send-photo", help="Send local image as Telegram photo"
+        "send-photo", aliases=["send-media"], help="Send local photo/video as Telegram media (multiple = album)"
     )
     tg_send_photo.add_argument("peer", help="Target peer")
-    tg_send_photo.add_argument("path", help="Local image path")
+    tg_send_photo.add_argument("path", nargs="+", help="Local image path(s)")
     tg_send_photo.add_argument("--caption", default=None, help="Optional caption")
     tg_send_photo.add_argument("--reply-to", type=int, default=None, help="Reply target message id")
     tg_send_photo.add_argument(
         "--full", action="store_true", help="Return fuller sent message object"
     )
+    tg_send_photo.add_argument(
+        "--as-gif", action="store_true", help="Send video as GIF/animation (no sound, autoplay)"
+    )
+
+    tg_send_album = tg_subparsers.add_parser("send-album", help="Send multiple files as an album")
+    tg_send_album.add_argument("peer", help="Target peer")
+    tg_send_album.add_argument("paths", nargs="+", help="Local file paths")
+    tg_send_album.add_argument("--caption", default=None, help="Optional caption")
+    tg_send_album.add_argument("--reply-to", type=int, default=None, help="Reply target message id")
+    tg_send_album.add_argument("--full", action="store_true", help="Return fuller message objects")
 
     tg_send_voice = tg_subparsers.add_parser(
         "send-voice", help="Send local audio file as Telegram voice note"
@@ -725,6 +736,30 @@ def run_tg_speak(
     )
 
 
+_VIDEO_EXTENSIONS = {".mp4", ".avi", ".mkv", ".mov", ".webm", ".flv", ".wmv", ".m4v"}
+
+
+def _validate_video_if_needed(path: str) -> None:
+    """Run ffmpeg probe on video files to catch corrupted files before sending."""
+    import subprocess
+    from imageio_ffmpeg import get_ffmpeg_exe
+    p = Path(path)
+    if p.suffix.lower() not in _VIDEO_EXTENSIONS:
+        return
+    if not p.exists():
+        raise AssistantToolsError(f"File not found: {path}", error_type="file_not_found")
+    ffmpeg = get_ffmpeg_exe()
+    result = subprocess.run(
+        [ffmpeg, "-v", "error", "-i", path, "-f", "null", "-"],
+        capture_output=True, text=True, timeout=30,
+    )
+    if result.returncode != 0:
+        raise AssistantToolsError(
+            f"Video file appears corrupted or invalid: {path}\n{result.stderr.strip()}",
+            error_type="invalid_video",
+        )
+
+
 def _daemon_middleware(args: Any, tg_config: Any) -> CommandResult | None:
     """Middleware: if daemon can handle this command, proxy through it. Returns None to fall through."""
     import asyncio as _asyncio
@@ -806,6 +841,12 @@ def dispatch(
     if args.command == "tg":
         tg_config = resolve_tg_config(config, args.profile)
 
+        # Validate video files before sending (catches corrupted files early)
+        if args.tg_command in ("send-file", "send-photo", "send-media"):
+            paths = [str(args.path)] if isinstance(args.path, str) else [str(p) for p in args.path] if isinstance(args.path, list) else [str(args.path)]
+            for p in paths:
+                _validate_video_if_needed(p)
+
         # Daemon middleware: transparently proxies supported commands through daemon
         result = _daemon_middleware(args, tg_config)
         if result is not None:
@@ -860,7 +901,7 @@ def dispatch(
             )
         if args.tg_command == "send":
             return tg_commands.run(
-                tg_commands.send_message(tg_config, args.peer, args.text, args.reply_to, args.full)
+                tg_commands.send_message(tg_config, args.peer, args.text, args.reply_to, args.full, args.parse_mode)
             )
         if args.tg_command == "send-file":
             return tg_commands.run(
@@ -868,10 +909,27 @@ def dispatch(
                     tg_config, args.peer, str(args.path), args.caption, args.reply_to, args.full
                 )
             )
-        if args.tg_command == "send-photo":
+        if args.tg_command in ("send-photo", "send-media"):
+            if len(args.path) == 1:
+                as_gif = getattr(args, "as_gif", False)
+                return tg_commands.run(
+                    tg_commands.send_photo(
+                        tg_config, args.peer, str(args.path[0]), args.caption, args.reply_to, args.full,
+                        force_video=not as_gif,
+                    )
+                )
+            else:
+                as_gif = getattr(args, "as_gif", False)
+                return tg_commands.run(
+                    tg_commands.send_album(
+                        tg_config, args.peer, args.path, args.caption, args.reply_to, args.full,
+                        force_video=not as_gif,
+                    )
+                )
+        if args.tg_command == "send-album":
             return tg_commands.run(
-                tg_commands.send_photo(
-                    tg_config, args.peer, str(args.path), args.caption, args.reply_to, args.full
+                tg_commands.send_album(
+                    tg_config, args.peer, args.paths, args.caption, args.reply_to, args.full
                 )
             )
         if args.tg_command == "send-voice":
