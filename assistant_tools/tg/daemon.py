@@ -205,8 +205,8 @@ async def handle_client(reader: asyncio.StreamReader, writer: asyncio.StreamWrit
                 if _is_user_reply(msg, mid):
                     responses.append(normalize_message(msg, chat_entity=entity))
 
-            # Send question if provided
-            if text:
+            # Send question ONLY if no pending messages
+            if text and not responses:
                 session_tag = session_id.replace("/dev/pts/", "pts").replace("/", "_").replace("-", "_")
                 formatted = f"❓ **#ask_{session_tag}**\n\n{text}"
                 kwargs_ask: dict[str, Any] = {"parse_mode": "md"}
@@ -214,12 +214,9 @@ async def handle_client(reader: asyncio.StreamReader, writer: asyncio.StreamWrit
                 msg_id = int(getattr(sent_msg, "id", 0) or 0)
                 if peer_id and msg_id:
                     record_sent(config, peer_id, msg_id)
-                    max_seen = msg_id
-                    if responses:
-                        max_seen = max(msg_id, max(r.get("message_id", 0) for r in responses))
-                    record_ask(config, peer_id, max_seen, session_id)
+                    record_ask(config, peer_id, msg_id, session_id)
             elif responses and peer_id:
-                # No text but collected responses — update baseline
+                # Have pending responses — update baseline, don't send question
                 max_seen = max(r.get("message_id", 0) for r in responses)
                 if max_seen:
                     record_ask(config, peer_id, max_seen, session_id)
