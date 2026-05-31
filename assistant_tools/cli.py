@@ -339,15 +339,17 @@ def build_parser() -> argparse.ArgumentParser:
     tg_copy.add_argument("--full", action="store_true", help="Return fuller copied message object")
 
     tg_find_dialog = tg_subparsers.add_parser(
-        "find-dialog", help="Find dialog by title/username (DeepInfra embeddings)"
+        "find-dialog", help="Find people and chats by name (Telegram search)"
     )
-    tg_find_dialog.add_argument("query", help="Query string")
-    tg_find_dialog.add_argument("--limit", type=int, default=400, help="Dialogs to scan")
-    tg_find_dialog.add_argument("--top", type=int, default=10, help="Top matches to return")
+    tg_find_dialog.add_argument("query", help="Search query (name, username, title)")
+    tg_find_dialog.add_argument("--limit", type=int, default=20, help="Max results to return")
     tg_find_dialog.add_argument(
-        "--model",
-        default="BAAI/bge-m3-multi",
-        help="DeepInfra embeddings model name",
+        "--embeddings", action="store_true",
+        help="Force DeepInfra embeddings (auto-enabled if DEEPINFRA_TOKEN is set)",
+    )
+    tg_find_dialog.add_argument("--top", type=int, default=10, help="Top matches (embeddings mode)")
+    tg_find_dialog.add_argument(
+        "--model", default="BAAI/bge-m3-multi", help="Embeddings model (embeddings mode)",
     )
 
     tg_subparsers.add_parser("daemon-start", help=argparse.SUPPRESS)
@@ -825,15 +827,23 @@ def dispatch(
         if args.tg_command == "resolve":
             return tg_commands.run(tg_commands.resolve_peer(tg_config, args.peer))
         if args.tg_command == "find-dialog":
+            if args.embeddings or os.environ.get("DEEPINFRA_TOKEN"):
+                return tg_commands.run(
+                    tg_commands.find_dialog_embeddings(
+                        tg_config,
+                        query=str(args.query),
+                        limit=int(args.limit),
+                        top=int(args.top),
+                        model=str(args.model),
+                        timeout_seconds=float(config.network.timeout_seconds),
+                        proxy=(config.network.proxy or None),
+                    )
+                )
             return tg_commands.run(
                 tg_commands.find_dialog(
                     tg_config,
                     query=str(args.query),
                     limit=int(args.limit),
-                    top=int(args.top),
-                    model=str(args.model),
-                    timeout_seconds=float(config.network.timeout_seconds),
-                    proxy=(config.network.proxy or None),
                 )
             )
         if args.tg_command == "dialogs":
