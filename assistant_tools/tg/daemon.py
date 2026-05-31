@@ -142,9 +142,24 @@ async def handle_client(reader: asyncio.StreamReader, writer: asyncio.StreamWrit
             last_ask_id = get_last_ask(config, peer_id, session_id)
             baseline_id = last_ask_id
 
+            def _is_user_reply(msg: Any, mid: int) -> bool:
+                """Check if message is a user reply (not sent by kit)."""
+                if mid <= baseline_id:
+                    return False
+                if is_own_message(config, peer_id, mid):
+                    return False
+                return True
+
+            # FIRST: collect any pending messages BEFORE sending ask
+            responses: list[dict[str, Any]] = []
+            messages_raw = await client.get_messages(entity, limit=50)
+            for msg in reversed(list(messages_raw or [])):
+                mid = int(getattr(msg, "id", 0) or 0)
+                if _is_user_reply(msg, mid):
+                    responses.append(normalize_message(msg, chat_entity=entity))
+
             # Send question if provided
             if text:
-                # Format ask message with session tag and visual distinction
                 session_tag = session_id.replace("/dev/pts/", "pts").replace("/", "_").replace("-", "_")
                 formatted = f"❓ **#ask_{session_tag}**\n\n{text}"
                 kwargs_ask: dict[str, Any] = {"parse_mode": "md"}
@@ -153,8 +168,6 @@ async def handle_client(reader: asyncio.StreamReader, writer: asyncio.StreamWrit
                 if peer_id and msg_id:
                     record_sent(config, peer_id, msg_id)
                     record_ask(config, peer_id, msg_id, session_id)
-                    # DON'T update baseline — keep it at last_ask_id so we collect
-                    # user messages sent between previous ask and this one
 
             # If no text and no previous ask — nothing to wait for
             if not text and baseline_id == 0:
@@ -164,33 +177,6 @@ async def handle_client(reader: asyncio.StreamReader, writer: asyncio.StreamWrit
                 writer.close()
                 await writer.wait_closed()
                 return
-
-            def _is_user_reply(msg: Any, mid: int) -> bool:
-                """Check if message is a user reply (not sent by kit)."""
-                if mid <= baseline_id:
-                    return False
-                # Skip messages sent by kit
-                if is_own_message(config, peer_id, mid):
-                    return False
-                return True
-
-            # Collect any messages already there (sent between asks)
-            responses: list[dict[str, Any]] = []
-            messages_raw = await client.get_messages(entity, limit=50)
-            for msg in reversed(list(messages_raw or [])):
-                mid = int(getattr(msg, "id", 0) or 0)
-                if _is_user_reply(msg, mid):
-                    responses.append(normalize_message(msg, chat_entity=entity))
-
-            if responses:
-                # Grace period: wait 3s to collect follow-up messages
-                await asyncio.sleep(3)
-                messages_raw = await client.get_messages(entity, limit=50)
-                for msg in reversed(list(messages_raw or [])):
-                    mid = int(getattr(msg, "id", 0) or 0)
-                    if _is_user_reply(msg, mid):
-                        if not any(r.get("message_id") == mid for r in responses):
-                            responses.append(normalize_message(msg, chat_entity=entity))
 
             if responses:
                 # Auto-react to show user the agent read the message
@@ -226,15 +212,6 @@ async def handle_client(reader: asyncio.StreamReader, writer: asyncio.StreamWrit
                             responses.append(normalize_message(msg, chat_entity=entity))
                             baseline_id = max(baseline_id, mid)
                     if responses:
-                        # Grace period: wait 3s more to collect follow-up messages
-                        await asyncio.sleep(3)
-                        messages_raw = await client.get_messages(entity, limit=10)
-                        for msg in reversed(list(messages_raw or [])):
-                            mid = int(getattr(msg, "id", 0) or 0)
-                            if _is_user_reply(msg, mid):
-                                if not any(r.get("message_id") == mid for r in responses):
-                                    responses.append(normalize_message(msg, chat_entity=entity))
-                                    baseline_id = max(baseline_id, mid)
                         break
 
                 # Auto-react after getting responses from wait loop
