@@ -349,6 +349,11 @@ def build_parser() -> argparse.ArgumentParser:
     tg_copy.add_argument("target_peer", help="Target peer")
     tg_copy.add_argument("--full", action="store_true", help="Return fuller copied message object")
 
+    tg_stt = tg_subparsers.add_parser("stt", help="Download voice/audio message and transcribe (STT)")
+    tg_stt.add_argument("peer", help="Target peer")
+    tg_stt.add_argument("message_id", type=int, help="Message id with voice/audio")
+    tg_stt.add_argument("--language", default="", help="Language hint (e.g. ru, en)")
+
     tg_find_dialog = tg_subparsers.add_parser(
         "find-dialog", help="Find people and chats by name (Telegram search)"
     )
@@ -385,7 +390,13 @@ def run_stt(
     source: str = str(args.input)
     if not is_url(source):
         ensure_path_exists(source)
-    api_key: str = require_env("GROQ_API_KEY")
+    api_key: str = config.stt.api_key or os.environ.get("GROQ_API_KEY", "")
+    if not api_key:
+        raise AssistantToolsError(
+            "Missing STT API key: set stt.api_key in config or GROQ_API_KEY env var",
+            error_type="missing_env",
+            exit_code=3,
+        )
     model: str = args.model or config.stt.model
     language: str = args.language if args.language is not None else config.stt.language
     timestamps: str = args.timestamps if args.timestamps is not None else config.stt.timestamps
@@ -401,6 +412,7 @@ def run_stt(
         temperature=config.stt.temperature,
         prompt=prompt,
         proxy=config.network.proxy or None,
+        url=config.stt.url or None,
     )
     return CommandResult(
         ok=True,
@@ -588,6 +600,8 @@ def run_video(
         temperature=config.stt.temperature,
         prompt=prompt,
         proxy=config.network.proxy or None,
+        api_key=config.stt.api_key or os.environ.get("GROQ_API_KEY", ""),
+        url=config.stt.url or None,
     )
     return CommandResult(
         ok=True,
@@ -734,6 +748,41 @@ def run_tg_speak(
         error=voice_result.error,
         meta=meta,
     )
+
+
+def _run_tg_stt(args: Any, config: AppConfig, tg_config: Any) -> CommandResult:
+    """Download voice/audio message and transcribe."""
+    import asyncio as _asyncio
+    import shutil
+    import tempfile
+    from assistant_tools.tg import commands as _cmds
+
+    # Download
+    result = _cmds.run(_cmds.media_download(tg_config, args.peer, args.message_id, None, False))
+    if not result.ok:
+        return result
+    path = result.data.get("path", "")
+    if not path:
+        return CommandResult(ok=False, command="tg.stt", provider="groq", data=None,
+                            error={"type": "no_media", "message": "Message has no downloadable media"}, meta={})
+    # Rename to .ogg for whisper compatibility
+    ogg_path = path if path.endswith(".ogg") else path.rsplit(".", 1)[0] + ".ogg"
+    if ogg_path != path:
+        shutil.copy2(path, ogg_path)
+    # Transcribe
+    api_key = config.stt.api_key or os.environ.get("GROQ_API_KEY", "")
+    if not api_key:
+        return CommandResult(ok=False, command="tg.stt", provider="groq", data=None,
+                            error={"type": "missing_key", "message": "No STT api_key in config or GROQ_API_KEY env"}, meta={})
+    result_data = groq_provider.transcribe(
+        source=ogg_path, api_key=api_key, model=config.stt.model,
+        language=args.language or "", url=config.stt.url,
+        timeout_seconds=60, timestamps="none", temperature=0.0, prompt="", proxy=None,
+    )
+    text = result_data.get("text", "")
+    return CommandResult(ok=True, command="tg.stt", provider="groq",
+                        data={"text": text, "source_path": path, "message_id": args.message_id},
+                        error=None, meta={"peer": args.peer, "model": config.stt.model})
 
 
 _VIDEO_EXTENSIONS = {".mp4", ".avi", ".mkv", ".mov", ".webm", ".flv", ".wmv", ".m4v"}
@@ -1009,6 +1058,8 @@ def dispatch(
             from assistant_tools.tg.daemon import SOCKET_PATH
             running = SOCKET_PATH.exists()
             return CommandResult(ok=True, command="tg.daemon-status", provider="telethon", data={"running": running, "socket": str(SOCKET_PATH)}, error=None, meta={})
+        if args.tg_command == "stt":
+            return _run_tg_stt(args, config, tg_config)
     raise AssistantToolsError(
         f"Unknown command: {args.command}",
         error_type="unknown_command",

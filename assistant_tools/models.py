@@ -14,7 +14,9 @@ class NetworkConfig:
 
 @dataclass(slots=True)
 class SttConfig:
+    url: str = "https://api.groq.com/openai/v1/audio/transcriptions"
     model: str = "whisper-large-v3"
+    api_key: str = ""
     language: str = ""
     timestamps: str = "none"
     temperature: float = 0.0
@@ -71,8 +73,8 @@ class VideoConfig:
 
 @dataclass(slots=True)
 class TgProfileConfig:
-    api_id: int = 0
-    api_hash: str = ""
+    api_id: int = 2040
+    api_hash: str = "b18441a1ff607e10a989891a5462e627"
     session_file: str = ""
     download_dir: str = ""
     cache_dir: str = ""
@@ -82,8 +84,8 @@ class TgProfileConfig:
 
 @dataclass(slots=True)
 class TgConfig:
-    api_id: int = 0
-    api_hash: str = ""
+    api_id: int = 2040
+    api_hash: str = "b18441a1ff607e10a989891a5462e627"
     default_profile: str = "main"
     session_file: str = "~/.local/state/assistant-tools/tg/main.session"
     session_dir: str = "~/.local/state/assistant-tools/tg/sessions"
