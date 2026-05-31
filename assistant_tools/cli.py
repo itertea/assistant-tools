@@ -304,6 +304,21 @@ def build_parser() -> argparse.ArgumentParser:
     tg_watch.add_argument("--full", action="store_true", help="Return fuller message objects")
     tg_watch.add_argument("--include-outgoing", action="store_true", help="Include own messages")
 
+    tg_forward = tg_subparsers.add_parser("forward", help="Forward message(s) to another chat")
+    tg_forward.add_argument("from_peer", help="Source peer")
+    tg_forward.add_argument("to_peer", help="Destination peer")
+    tg_forward.add_argument("message_ids", nargs="+", type=int, help="Message IDs to forward")
+
+    tg_edit = tg_subparsers.add_parser("edit", help="Edit a message sent by kit")
+    tg_edit.add_argument("peer", help="Target peer")
+    tg_edit.add_argument("message_id", type=int, help="Message ID to edit")
+    tg_edit.add_argument("text", help="New text")
+    tg_edit.add_argument("--parse-mode", default=None, choices=["md", "html"], help="Parse mode")
+
+    tg_delete = tg_subparsers.add_parser("delete", help="Delete message(s) sent by kit")
+    tg_delete.add_argument("peer", help="Target peer")
+    tg_delete.add_argument("message_ids", nargs="+", type=int, help="Message IDs to delete")
+
     tg_media_info = tg_subparsers.add_parser("media-info", help="Show media metadata")
     tg_media_info.add_argument("peer", help="Target peer")
     tg_media_info.add_argument("message_id", type=int, help="Message id")
@@ -883,6 +898,18 @@ def dispatch(
                 tg_commands.media_download(
                     tg_config, args.peer, args.message_id, args.output_dir, args.full
                 )
+            )
+        if args.tg_command == "forward":
+            return tg_commands.run(
+                tg_commands.forward_message(tg_config, args.from_peer, args.to_peer, args.message_ids)
+            )
+        if args.tg_command == "edit":
+            return tg_commands.run(
+                tg_commands.edit_message(tg_config, args.peer, args.message_id, args.text, args.parse_mode)
+            )
+        if args.tg_command == "delete":
+            return tg_commands.run(
+                tg_commands.delete_message(tg_config, args.peer, args.message_ids)
             )
         if args.tg_command == "watch":
             return tg_commands.run(
