@@ -180,17 +180,11 @@ async def handle_client(reader: asyncio.StreamReader, writer: asyncio.StreamWrit
             # If no text and no previous ask — nothing to wait for
             if not text and baseline_id == 0:
                 result = {"ok": True, "data": {"responses": []}}
-                writer.write(json.dumps(result, ensure_ascii=False).encode())
-                await writer.drain()
-                writer.close()
-                await writer.wait_closed()
-                return
-
-            if responses:
+            elif responses:
                 # Auto-react to show user the agent read the message
                 from telethon.tl.functions.messages import SendReactionRequest
                 from telethon.tl.types import ReactionEmoji, InputPeerUser
-                react_peer = await client.get_input_entity(await client.get_me())
+                react_peer = await client.get_input_entity(entity)
                 for resp in responses:
                     try:
                         mid = resp.get("message_id")
@@ -226,7 +220,7 @@ async def handle_client(reader: asyncio.StreamReader, writer: asyncio.StreamWrit
                 if responses:
                     from telethon.tl.functions.messages import SendReactionRequest as SR2
                     from telethon.tl.types import ReactionEmoji as RE2
-                    react_peer2 = await client.get_input_entity(await client.get_me())
+                    react_peer2 = await client.get_input_entity(entity)
                     for resp in responses:
                         try:
                             mid = resp.get("message_id")

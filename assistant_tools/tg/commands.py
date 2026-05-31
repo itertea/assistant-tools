@@ -495,7 +495,7 @@ async def send_photo(
         upload_path = input_path
 
         if is_video:
-            import subprocess, re, tempfile
+            import subprocess, tempfile
             from imageio_ffmpeg import get_ffmpeg_exe
             ffmpeg = get_ffmpeg_exe()
 
@@ -509,12 +509,15 @@ async def send_photo(
                 # Add silent audio track so Telegram doesn't mark as gif
                 tmp = tempfile.NamedTemporaryFile(suffix=f"_{input_path.name}", delete=False)
                 tmp.close()
-                subprocess.run(
+                result_ff = subprocess.run(
                     [ffmpeg, "-y", "-i", str(input_path), "-f", "lavfi", "-i", "anullsrc=r=44100:cl=mono",
                      "-c:v", "copy", "-c:a", "aac", "-shortest", tmp.name],
                     capture_output=True, timeout=120,
                 )
-                upload_path = Path(tmp.name)
+                if result_ff.returncode == 0:
+                    upload_path = Path(tmp.name)
+                else:
+                    Path(tmp.name).unlink(missing_ok=True)
 
         message: Any = await client.send_file(
             entity, str(upload_path), caption=caption,
@@ -571,13 +574,17 @@ async def send_album(
                 if "Audio:" not in probe.stderr:
                     tmp = tempfile.NamedTemporaryFile(suffix=f"_{p.name}", delete=False)
                     tmp.close()
-                    subprocess.run(
+                    r_ff = subprocess.run(
                         [ffmpeg, "-y", "-i", str(p), "-f", "lavfi", "-i", "anullsrc=r=44100:cl=mono",
                          "-c:v", "copy", "-c:a", "aac", "-shortest", tmp.name],
                         capture_output=True, timeout=120,
                     )
-                    upload_paths.append(Path(tmp.name))
-                    temp_files.append(Path(tmp.name))
+                    if r_ff.returncode == 0:
+                        upload_paths.append(Path(tmp.name))
+                        temp_files.append(Path(tmp.name))
+                    else:
+                        Path(tmp.name).unlink(missing_ok=True)
+                        upload_paths.append(p)
                     continue
             upload_paths.append(p)
     else:
