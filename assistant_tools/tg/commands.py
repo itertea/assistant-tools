@@ -484,17 +484,22 @@ async def send_photo(
     caption: str | None,
     reply_to_message_id: int | None,
     full: bool,
+    force_video: bool = False,
 ) -> CommandResult:
     from assistant_tools.tg.sent_db import record_sent
     input_path: Path = _ensure_local_file(path_value)
     async with telegram_client(config) as client:
         entity: Any = await _resolve_peer_entity(client, peer)
+        kwargs: dict[str, Any] = {}
+        if force_video or input_path.suffix.lower() in (".mp4", ".mkv", ".avi", ".mov", ".webm"):
+            kwargs["supports_streaming"] = True
         message: Any = await client.send_file(
             entity,
             str(input_path),
             caption=caption,
             reply_to=reply_to_message_id,
             force_document=False,
+            **kwargs,
         )
         peer_id = await _get_peer_id(client, entity)
         msg_id = int(getattr(message, "id", 0) or 0)

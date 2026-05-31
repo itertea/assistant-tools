@@ -249,6 +249,9 @@ def build_parser() -> argparse.ArgumentParser:
     tg_send_photo.add_argument(
         "--full", action="store_true", help="Return fuller sent message object"
     )
+    tg_send_photo.add_argument(
+        "--as-gif", action="store_true", help="Send video as GIF/animation (no sound, autoplay)"
+    )
 
     tg_send_voice = tg_subparsers.add_parser(
         "send-voice", help="Send local audio file as Telegram voice note"
@@ -960,9 +963,11 @@ def dispatch(
             )
         if args.tg_command in ("send-photo", "send-media"):
             if len(args.path) == 1:
+                as_gif = getattr(args, "as_gif", False)
                 return tg_commands.run(
                     tg_commands.send_photo(
-                        tg_config, args.peer, str(args.path[0]), args.caption, args.reply_to, args.full
+                        tg_config, args.peer, str(args.path[0]), args.caption, args.reply_to, args.full,
+                        force_video=not as_gif,
                     )
                 )
             else:
