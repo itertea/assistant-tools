@@ -726,6 +726,62 @@ async def wait_next_message(
             await asyncio.sleep(1.0 if infinite else min(1.0, max(0.0, remaining)))
 
 
+async def watch(
+    config: ResolvedTgConfig, peers: list[str], full: bool, include_outgoing: bool
+) -> CommandResult:
+    """Stream new messages from multiple peers via daemon. Prints one JSON line per message, never returns."""
+    import json as _json
+    import sys as _sys
+
+    from assistant_tools.tg.daemon import daemon_request, ensure_daemon
+
+    await ensure_daemon(config)
+
+    # Get own user id to filter outgoing
+    me_resp = await daemon_request({"cmd": "whoami"})
+    my_id = (me_resp.get("data") or {}).get("id", 0)
+
+    _OMIT = {"media_type", "reply_to_message_id", "action", "caption", "media_group_id", "link", "media", "has_protected_content", "mentioned", "outgoing"}
+
+    def _strip(obj: Any) -> Any:
+        if isinstance(obj, dict):
+            return {k: _strip(v) for k, v in obj.items() if not (v is None and k in _OMIT)}
+        if isinstance(obj, list):
+            return [_strip(i) for i in obj]
+        return obj
+
+    # Get baselines
+    baselines: dict[str, int] = {}
+    for peer in peers:
+        resp = await daemon_request({"cmd": "history", "peer": peer, "limit": 1, "full": False})
+        items = (resp.get("data") or {}).get("items") or []
+        baselines[peer] = items[0]["message_id"] if items else 0
+
+    # Poll loop
+    while True:
+        for peer in peers:
+            resp = await daemon_request({"cmd": "history", "peer": peer, "limit": 20, "full": full})
+            items = (resp.get("data") or {}).get("items") or []
+            new_msgs = []
+            for msg in reversed(items):
+                mid = msg.get("message_id", 0)
+                if mid <= baselines[peer]:
+                    continue
+                if not include_outgoing:
+                    fr = msg.get("from") or {}
+                    if fr.get("id") == my_id:
+                        continue
+                new_msgs.append(msg)
+                baselines[peer] = max(baselines[peer], mid)
+
+            for msg in new_msgs:
+                msg["peer"] = peer
+                _sys.stdout.write(_json.dumps(_strip(msg), ensure_ascii=False) + "\n")
+                _sys.stdout.flush()
+
+        await asyncio.sleep(1.5)
+
+
 async def media_info(
     config: ResolvedTgConfig, peer: str, message_id: int, full: bool
 ) -> CommandResult:

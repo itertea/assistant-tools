@@ -299,6 +299,11 @@ def build_parser() -> argparse.ArgumentParser:
     tg_ask.add_argument("--timeout", type=int, default=0, help="Seconds to wait for reply (0 = infinite)")
     tg_ask.add_argument("--parse-mode", default=None, choices=["md", "html"], help="Parse mode for question")
 
+    tg_watch = tg_subparsers.add_parser("watch", help="Stream new messages from one or more chats")
+    tg_watch.add_argument("peer", nargs="+", help="Target peer(s)")
+    tg_watch.add_argument("--full", action="store_true", help="Return fuller message objects")
+    tg_watch.add_argument("--include-outgoing", action="store_true", help="Include own messages")
+
     tg_media_info = tg_subparsers.add_parser("media-info", help="Show media metadata")
     tg_media_info.add_argument("peer", help="Target peer")
     tg_media_info.add_argument("message_id", type=int, help="Message id")
@@ -878,6 +883,10 @@ def dispatch(
                 tg_commands.media_download(
                     tg_config, args.peer, args.message_id, args.output_dir, args.full
                 )
+            )
+        if args.tg_command == "watch":
+            return tg_commands.run(
+                tg_commands.watch(tg_config, args.peer, args.full, args.include_outgoing)
             )
         if args.tg_command == "copy":
             return tg_commands.run(
