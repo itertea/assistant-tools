@@ -750,6 +750,30 @@ def run_tg_speak(
     )
 
 
+_VIDEO_EXTENSIONS = {".mp4", ".avi", ".mkv", ".mov", ".webm", ".flv", ".wmv", ".m4v"}
+
+
+def _validate_video_if_needed(path: str) -> None:
+    """Run ffmpeg probe on video files to catch corrupted files before sending."""
+    import subprocess
+    from imageio_ffmpeg import get_ffmpeg_exe
+    p = Path(path)
+    if p.suffix.lower() not in _VIDEO_EXTENSIONS:
+        return
+    if not p.exists():
+        raise AssistantToolsError(f"File not found: {path}", error_type="file_not_found")
+    ffmpeg = get_ffmpeg_exe()
+    result = subprocess.run(
+        [ffmpeg, "-v", "error", "-i", path, "-f", "null", "-"],
+        capture_output=True, text=True, timeout=30,
+    )
+    if result.returncode != 0:
+        raise AssistantToolsError(
+            f"Video file appears corrupted or invalid: {path}\n{result.stderr.strip()}",
+            error_type="invalid_video",
+        )
+
+
 def _toml_value(val: str) -> str:
     """Format value for TOML."""
     try:
@@ -864,6 +888,12 @@ def dispatch(
             return CommandResult(ok=True, command="config.set", provider="local", data={"key": args.key, "value": args.value}, error=None, meta={})
     if args.command == "tg":
         tg_config = resolve_tg_config(config, args.profile)
+
+        # Validate video files before sending (catches corrupted files early)
+        if args.tg_command in ("send-file", "send-photo"):
+            paths = [str(args.path)] if isinstance(args.path, str) else [str(p) for p in args.path] if isinstance(args.path, list) else [str(args.path)]
+            for p in paths:
+                _validate_video_if_needed(p)
 
         # Daemon middleware: transparently proxies supported commands through daemon
         result = _daemon_middleware(args, tg_config)

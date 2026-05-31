@@ -307,6 +307,8 @@ async def daemon_request(request: dict[str, Any]) -> dict[str, Any]:
         data = await reader.read(1 << 20)
         writer.close()
         await writer.wait_closed()
+        if not data:
+            return {"ok": False, "error": "daemon closed connection without response"}
         return json.loads(data.decode())
     except (ConnectionRefusedError, ConnectionResetError, OSError):
         SOCKET_PATH.unlink(missing_ok=True)
