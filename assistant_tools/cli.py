@@ -298,10 +298,10 @@ def build_parser() -> argparse.ArgumentParser:
     tg_wait_next = tg_subparsers.add_parser("wait-next", help="Wait for the next incoming message")
     tg_wait_next.add_argument("peer", nargs="+", help="Target peer(s) — one or more")
     tg_wait_next.add_argument(
-        "--timeout-seconds",
+        "--timeout", "--timeout-seconds",
         type=float,
         default=0,
-        help="How long to wait before timing out (0 = infinite)",
+        help="Seconds to wait (0 = infinite)",
     )
     tg_wait_next.add_argument("--full", action="store_true", help="Return fuller message object")
 
@@ -1031,9 +1031,11 @@ def dispatch(
                     )
                 )
             else:
+                as_gif = getattr(args, "as_gif", False)
                 return tg_commands.run(
                     tg_commands.send_album(
-                        tg_config, args.peer, args.path, args.caption, args.reply_to, args.full
+                        tg_config, args.peer, args.path, args.caption, args.reply_to, args.full,
+                        force_video=not as_gif,
                     )
                 )
         if args.tg_command == "send-voice":
@@ -1075,7 +1077,7 @@ def dispatch(
                 tg_commands.wait_next_message(
                     tg_config,
                     args.peer,
-                    float(args.timeout_seconds),
+                    float(args.timeout),
                     args.full,
                 )
             )

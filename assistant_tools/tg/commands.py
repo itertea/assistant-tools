@@ -553,14 +553,41 @@ async def send_album(
     caption: str | None,
     reply_to_message_id: int | None,
     full: bool,
+    force_video: bool = False,
 ) -> CommandResult:
     from assistant_tools.tg.sent_db import record_sent
     input_paths: list[Path] = [_ensure_local_file(p) for p in paths]
+
+    # Add silent audio to videos without sound (prevents gif conversion)
+    upload_paths: list[Path] = []
+    temp_files: list[Path] = []
+    if force_video:
+        import subprocess, tempfile
+        from imageio_ffmpeg import get_ffmpeg_exe
+        ffmpeg = get_ffmpeg_exe()
+        for p in input_paths:
+            if p.suffix.lower() in (".mp4", ".mkv", ".avi", ".mov", ".webm"):
+                probe = subprocess.run([ffmpeg, "-i", str(p)], capture_output=True, text=True, timeout=30)
+                if "Audio:" not in probe.stderr:
+                    tmp = tempfile.NamedTemporaryFile(suffix=f"_{p.name}", delete=False)
+                    tmp.close()
+                    subprocess.run(
+                        [ffmpeg, "-y", "-i", str(p), "-f", "lavfi", "-i", "anullsrc=r=44100:cl=mono",
+                         "-c:v", "copy", "-c:a", "aac", "-shortest", tmp.name],
+                        capture_output=True, timeout=120,
+                    )
+                    upload_paths.append(Path(tmp.name))
+                    temp_files.append(Path(tmp.name))
+                    continue
+            upload_paths.append(p)
+    else:
+        upload_paths = input_paths
+
     async with telegram_client(config) as client:
         entity: Any = await _resolve_peer_entity(client, peer)
         messages: Any = await client.send_file(
             entity,
-            [str(p) for p in input_paths],
+            [str(p) for p in upload_paths],
             caption=caption,
             reply_to=reply_to_message_id,
         )
@@ -571,6 +598,9 @@ async def send_album(
             if peer_id and msg_id:
                 record_sent(config, peer_id, msg_id)
             items.append(normalize_message(msg, chat_entity=entity, full=full))
+        # Cleanup temp files
+        for tf in temp_files:
+            tf.unlink(missing_ok=True)
         return _ok(
             "tg.send-album",
             {"messages": items},
