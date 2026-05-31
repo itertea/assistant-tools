@@ -215,6 +215,15 @@ async def handle_client(reader: asyncio.StreamReader, writer: asyncio.StreamWrit
                             responses.append(normalize_message(msg, chat_entity=entity))
                             baseline_id = max(baseline_id, mid)
                     if responses:
+                        # Grace period: wait 2s more to collect follow-up messages
+                        await asyncio.sleep(2)
+                        messages_raw = await client.get_messages(entity, limit=10)
+                        for msg in reversed(list(messages_raw or [])):
+                            mid = int(getattr(msg, "id", 0) or 0)
+                            if _is_user_reply(msg, mid):
+                                if not any(r.get("message_id") == mid for r in responses):
+                                    responses.append(normalize_message(msg, chat_entity=entity))
+                                    baseline_id = max(baseline_id, mid)
                         break
 
                 # Auto-react after getting responses from wait loop
