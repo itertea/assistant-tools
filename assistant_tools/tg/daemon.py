@@ -209,7 +209,7 @@ async def handle_client(reader: asyncio.StreamReader, writer: asyncio.StreamWrit
             if text and not responses:
                 session_tag = session_id.replace("/dev/pts/", "pts").replace("/", "_").replace("-", "_")
                 formatted = f"❓ **#ask_{session_tag}**\n\n{text}"
-                kwargs_ask: dict[str, Any] = {"parse_mode": "md"}
+                kwargs_ask: dict[str, Any] = {}
                 sent_msg = await client.send_message(entity, formatted, **kwargs_ask)
                 msg_id = int(getattr(sent_msg, "id", 0) or 0)
                 if peer_id and msg_id:
