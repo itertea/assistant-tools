@@ -153,7 +153,8 @@ async def handle_client(reader: asyncio.StreamReader, writer: asyncio.StreamWrit
                 if peer_id and msg_id:
                     record_sent(config, peer_id, msg_id)
                     record_ask(config, peer_id, msg_id, session_id)
-                    baseline_id = msg_id
+                    # DON'T update baseline — keep it at last_ask_id so we collect
+                    # user messages sent between previous ask and this one
 
             # If no text and no previous ask — nothing to wait for
             if not text and baseline_id == 0:
