@@ -110,6 +110,17 @@ async def _resolve_peer_entity(client: TelegramClient, peer: str) -> Any:
         return await client.get_entity(peer)
 
 
+async def _get_peer_id(client: TelegramClient, entity: Any) -> int:
+    """Get numeric peer ID, handling InputPeerSelf."""
+    eid: int = int(getattr(entity, "id", 0) or getattr(entity, "user_id", 0) or getattr(entity, "channel_id", 0) or getattr(entity, "chat_id", 0) or 0)
+    if eid:
+        return eid
+    if isinstance(entity, InputPeerSelf):
+        me: Any = await client.get_me()
+        return int(getattr(me, "id", 0) or 0)
+    return 0
+
+
 def _voice_upload_path(path: Path) -> tuple[Path, bool]:
     suffix: str = path.suffix.lower()
     if suffix in {".ogg", ".opus"}:
@@ -399,12 +410,17 @@ async def get_messages(
 async def send_message(
     config: ResolvedTgConfig, peer: str, text: str, reply_to_message_id: int | None, full: bool
 ) -> CommandResult:
+    from assistant_tools.tg.sent_db import record_sent
     async with telegram_client(config) as client:
         entity: Any = await _resolve_peer_entity(client, peer)
         if reply_to_message_id is None:
             message: Any = await client.send_message(entity, text)
         else:
             message = await client.send_message(entity, text, reply_to=reply_to_message_id)
+        peer_id = await _get_peer_id(client, entity)
+        msg_id = getattr(message, "id", 0)
+        if peer_id and msg_id:
+            record_sent(config, int(peer_id), int(msg_id))
         return _ok(
             "tg.send",
             {"message": normalize_message(message, chat_entity=entity, full=full)},
@@ -425,6 +441,7 @@ async def send_file(
     reply_to_message_id: int | None,
     full: bool,
 ) -> CommandResult:
+    from assistant_tools.tg.sent_db import record_sent
     input_path: Path = _ensure_local_file(path_value)
     async with telegram_client(config) as client:
         entity: Any = await _resolve_peer_entity(client, peer)
@@ -435,6 +452,10 @@ async def send_file(
             reply_to=reply_to_message_id,
             force_document=True,
         )
+        peer_id = await _get_peer_id(client, entity)
+        msg_id = int(getattr(message, "id", 0) or 0)
+        if peer_id and msg_id:
+            record_sent(config, peer_id, msg_id)
         return _ok(
             "tg.send-file",
             {
@@ -460,6 +481,7 @@ async def send_photo(
     reply_to_message_id: int | None,
     full: bool,
 ) -> CommandResult:
+    from assistant_tools.tg.sent_db import record_sent
     input_path: Path = _ensure_local_file(path_value)
     async with telegram_client(config) as client:
         entity: Any = await _resolve_peer_entity(client, peer)
@@ -470,6 +492,10 @@ async def send_photo(
             reply_to=reply_to_message_id,
             force_document=False,
         )
+        peer_id = await _get_peer_id(client, entity)
+        msg_id = int(getattr(message, "id", 0) or 0)
+        if peer_id and msg_id:
+            record_sent(config, peer_id, msg_id)
         return _ok(
             "tg.send-photo",
             {
