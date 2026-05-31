@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 from pathlib import Path
 from typing import Any
 
@@ -322,6 +323,10 @@ def build_parser() -> argparse.ArgumentParser:
         default="BAAI/bge-m3-multi",
         help="DeepInfra embeddings model name",
     )
+
+    tg_subparsers.add_parser("daemon-start", help=argparse.SUPPRESS)
+    tg_subparsers.add_parser("daemon-stop", help=argparse.SUPPRESS)
+    tg_subparsers.add_parser("daemon-status", help=argparse.SUPPRESS)
 
     return parser
 
@@ -692,6 +697,68 @@ def run_tg_speak(
     )
 
 
+def _daemon_middleware(args: Any, tg_config: Any) -> CommandResult | None:
+    """Middleware: if daemon can handle this command, proxy through it. Returns None to fall through."""
+    import asyncio as _asyncio
+    from assistant_tools.tg.daemon import daemon_request, ensure_daemon
+
+    daemon_cmd = _build_daemon_request(args)
+    if daemon_cmd is None:
+        return None
+
+    _asyncio.run(ensure_daemon(tg_config))
+    resp = _asyncio.run(daemon_request(daemon_cmd))
+
+    if not resp.get("ok") and resp.get("error") == "daemon not running (no socket)":
+        return None  # Fall through to direct connection
+
+    return CommandResult(
+        ok=resp.get("ok", False),
+        command=f"tg.{args.tg_command}",
+        provider="daemon",
+        data=resp.get("data"),
+        error=resp.get("error"),
+        meta={"daemon": True, "profile": tg_config.profile},
+    )
+
+
+def _build_daemon_request(args: Any) -> dict[str, Any] | None:
+    """Convert CLI args to a daemon request dict. Returns None if command not supported by daemon."""
+    cmd = args.tg_command
+    if cmd == "history":
+        return {"cmd": "history", "peer": args.peer, "limit": args.limit, "full": args.full}
+    if cmd == "send":
+        return {"cmd": "send", "peer": args.peer, "text": args.text, "reply_to": args.reply_to, "parse_mode": getattr(args, "parse_mode", None)}
+    if cmd == "find-dialog":
+        return {"cmd": "find_dialog", "query": args.query, "limit": args.limit}
+    if cmd == "get":
+        return {"cmd": "get", "peer": args.peer, "message_ids": args.message_ids, "full": args.full}
+    if cmd == "forward":
+        return {"cmd": "forward", "from_peer": args.from_peer, "to_peer": args.to_peer, "message_ids": args.message_ids}
+    if cmd == "edit":
+        return {"cmd": "edit", "peer": args.peer, "message_id": args.message_id, "text": args.text, "parse_mode": getattr(args, "parse_mode", None)}
+    if cmd == "delete":
+        return {"cmd": "delete", "peer": args.peer, "message_ids": args.message_ids}
+    if cmd == "ask":
+        session_id = os.environ.get("KIT_SESSION_ID")
+        if not session_id:
+            try:
+                session_id = os.ttyname(0)
+            except OSError:
+                session_id = "default"
+        return {"cmd": "ask", "peer": args.peer, "text": args.text, "timeout": args.timeout, "parse_mode": getattr(args, "parse_mode", None), "session_id": session_id}
+    if cmd == "send-file":
+        return {"cmd": "send_file", "peer": args.peer, "path": str(args.path), "caption": args.caption, "reply_to": args.reply_to}
+    if cmd in ("send-photo", "send-media"):
+        if hasattr(args, "path") and len(args.path) == 1:
+            return {"cmd": "send_photo", "peer": args.peer, "path": str(args.path[0]), "caption": args.caption, "reply_to": args.reply_to}
+        return None  # albums fall through
+    if cmd == "send-voice":
+        return {"cmd": "send_voice", "peer": args.peer, "path": str(args.path), "caption": args.caption, "reply_to": args.reply_to}
+    # Commands not yet supported by daemon — fall through to direct connection
+    return None
+
+
 def dispatch(
     args: argparse.Namespace, config: AppConfig, config_path: Path | None
 ) -> CommandResult:
@@ -710,6 +777,12 @@ def dispatch(
         return run_tts(args, config, verbose, config_path)
     if args.command == "tg":
         tg_config = resolve_tg_config(config, args.profile)
+
+        # Daemon middleware: transparently proxies supported commands through daemon
+        result = _daemon_middleware(args, tg_config)
+        if result is not None:
+            return result
+
         if args.tg_command == "auth":
             if args.tg_auth_command == "login":
                 return tg_commands.run(tg_commands.auth_login(tg_config, args.phone))
@@ -806,6 +879,26 @@ def dispatch(
                     tg_config, args.source_peer, args.message_id, args.target_peer, args.full
                 )
             )
+        if args.tg_command == "daemon-start":
+            from assistant_tools.tg.daemon import run_daemon
+            import asyncio
+            asyncio.run(run_daemon(tg_config))
+            return CommandResult(ok=True, command="tg.daemon-start", provider="telethon", data={}, error=None, meta={})
+        if args.tg_command == "daemon-stop":
+            import asyncio as _asyncio
+            from assistant_tools.tg.daemon import SOCKET_PATH, daemon_request
+            if SOCKET_PATH.exists():
+                try:
+                    _asyncio.run(daemon_request({"cmd": "shutdown"}))
+                except Exception:
+                    pass
+                import time; time.sleep(0.5)
+                SOCKET_PATH.unlink(missing_ok=True)
+            return CommandResult(ok=True, command="tg.daemon-stop", provider="telethon", data={"stopped": True}, error=None, meta={})
+        if args.tg_command == "daemon-status":
+            from assistant_tools.tg.daemon import SOCKET_PATH
+            running = SOCKET_PATH.exists()
+            return CommandResult(ok=True, command="tg.daemon-status", provider="telethon", data={"running": running, "socket": str(SOCKET_PATH)}, error=None, meta={})
     raise AssistantToolsError(
         f"Unknown command: {args.command}",
         error_type="unknown_command",
