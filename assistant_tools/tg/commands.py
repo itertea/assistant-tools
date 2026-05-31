@@ -843,6 +843,10 @@ async def watch(
 
     await ensure_daemon(config)
 
+    # Get own user id to filter outgoing
+    me_resp = await daemon_request({"cmd": "whoami"})
+    my_id = (me_resp.get("data") or {}).get("id", 0)
+
     _OMIT = {"media_type", "reply_to_message_id", "action", "caption", "media_group_id", "link", "media", "has_protected_content", "mentioned", "outgoing"}
 
     def _strip(obj: Any) -> Any:
@@ -871,9 +875,7 @@ async def watch(
                     continue
                 if not include_outgoing:
                     fr = msg.get("from") or {}
-                    # Skip outgoing unless self-chat
-                    # We check if sender is us by username
-                    if fr.get("username") == "iter_tea":
+                    if fr.get("id") == my_id:
                         continue
                 new_msgs.append(msg)
                 baselines[peer] = max(baselines[peer], mid)

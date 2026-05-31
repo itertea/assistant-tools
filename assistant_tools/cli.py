@@ -354,6 +354,11 @@ def build_parser() -> argparse.ArgumentParser:
     tg_copy = tg_subparsers.add_parser("copy", help="Copy message to another chat")
     tg_copy.add_argument("source_peer", help="Source peer")
     tg_copy.add_argument("message_id", type=int, help="Source message id")
+
+    tg_stt = tg_subparsers.add_parser("stt", help="Download voice/audio message and transcribe (STT)")
+    tg_stt.add_argument("peer", help="Target peer")
+    tg_stt.add_argument("message_id", type=int, help="Message id with voice/audio")
+    tg_stt.add_argument("--language", default="", help="Language hint (e.g. ru, en)")
     tg_copy.add_argument("target_peer", help="Target peer")
     tg_copy.add_argument("--full", action="store_true", help="Return fuller copied message object")
 
@@ -753,6 +758,41 @@ def run_tg_speak(
     )
 
 
+def _run_tg_stt(args: Any, config: AppConfig, tg_config: Any) -> CommandResult:
+    """Download voice/audio message and transcribe."""
+    import asyncio as _asyncio
+    import shutil
+    import tempfile
+    from assistant_tools.tg import commands as _cmds
+
+    # Download
+    result = _cmds.run(_cmds.media_download(tg_config, args.peer, args.message_id, None, False))
+    if not result.ok:
+        return result
+    path = result.data.get("path", "")
+    if not path:
+        return CommandResult(ok=False, command="tg.stt", provider="groq", data=None,
+                            error={"type": "no_media", "message": "Message has no downloadable media"}, meta={})
+    # Rename to .ogg for whisper compatibility
+    ogg_path = path if path.endswith(".ogg") else path.rsplit(".", 1)[0] + ".ogg"
+    if ogg_path != path:
+        shutil.copy2(path, ogg_path)
+    # Transcribe
+    api_key = config.stt.api_key or os.environ.get("GROQ_API_KEY", "")
+    if not api_key:
+        return CommandResult(ok=False, command="tg.stt", provider="groq", data=None,
+                            error={"type": "missing_key", "message": "No STT api_key in config or GROQ_API_KEY env"}, meta={})
+    result_data = groq_provider.transcribe(
+        source=ogg_path, api_key=api_key, model=config.stt.model,
+        language=args.language or "", url=config.stt.url,
+        timeout_seconds=60, timestamps="none", temperature=0.0, prompt="", proxy=None,
+    )
+    text = result_data.get("text", "")
+    return CommandResult(ok=True, command="tg.stt", provider="groq",
+                        data={"text": text, "source_path": path, "message_id": args.message_id},
+                        error=None, meta={"peer": args.peer, "model": config.stt.model})
+
+
 _VIDEO_EXTENSIONS = {".mp4", ".avi", ".mkv", ".mov", ".webm", ".flv", ".wmv", ".m4v"}
 
 
@@ -874,17 +914,37 @@ def dispatch(
             print(str(config_path_resolved))
             return CommandResult(ok=True, command="config.path", provider="local", data={"path": str(config_path_resolved)}, error=None, meta={})
         if args.config_command == "set":
-            import tomllib
+            import tomllib, re as _re
             content = config_path_resolved.read_text() if config_path_resolved.exists() else ""
-            # Simple: append or replace key
             section, _, key = args.key.rpartition(".")
             if not section:
                 section, key = "default", args.key
-            # Read existing
-            existing = tomllib.loads(content) if content else {}
-            if section not in existing:
-                content += f"\n[{section}]\n"
-            content += f"{key} = {_toml_value(args.value)}\n"
+            # Line-by-line: find section, replace or append key
+            lines = content.splitlines(keepends=True)
+            in_section = False
+            replaced = False
+            section_found = False
+            for i, line in enumerate(lines):
+                stripped = line.strip()
+                if stripped == f"[{section}]":
+                    in_section = True
+                    section_found = True
+                    continue
+                if stripped.startswith("[") and stripped.endswith("]"):
+                    if in_section and not replaced:
+                        # Insert before next section
+                        lines.insert(i, f"{key} = {_toml_value(args.value)}\n")
+                        replaced = True
+                    in_section = False
+                    continue
+                if in_section and _re.match(rf"^{_re.escape(key)}\s*=", stripped):
+                    lines[i] = f"{key} = {_toml_value(args.value)}\n"
+                    replaced = True
+            if not replaced:
+                if not section_found:
+                    lines.append(f"\n[{section}]\n")
+                lines.append(f"{key} = {_toml_value(args.value)}\n")
+            content = "".join(lines)
             config_path_resolved.parent.mkdir(parents=True, exist_ok=True)
             config_path_resolved.write_text(content)
             print(f"Set {args.key} = {args.value}")
@@ -1045,14 +1105,22 @@ def dispatch(
             asyncio.run(run_daemon(tg_config))
             return CommandResult(ok=True, command="tg.daemon-start", provider="telethon", data={}, error=None, meta={})
         if args.tg_command == "daemon-stop":
-            from assistant_tools.tg.daemon import SOCKET_PATH
+            import asyncio as _asyncio
+            from assistant_tools.tg.daemon import SOCKET_PATH, daemon_request
             if SOCKET_PATH.exists():
-                SOCKET_PATH.unlink()
+                try:
+                    _asyncio.run(daemon_request({"cmd": "shutdown"}))
+                except Exception:
+                    pass
+                import time; time.sleep(0.5)
+                SOCKET_PATH.unlink(missing_ok=True)
             return CommandResult(ok=True, command="tg.daemon-stop", provider="telethon", data={"stopped": True}, error=None, meta={})
         if args.tg_command == "daemon-status":
             from assistant_tools.tg.daemon import SOCKET_PATH
             running = SOCKET_PATH.exists()
             return CommandResult(ok=True, command="tg.daemon-status", provider="telethon", data={"running": running, "socket": str(SOCKET_PATH)}, error=None, meta={})
+        if args.tg_command == "stt":
+            return _run_tg_stt(args, config, tg_config)
     raise AssistantToolsError(
         f"Unknown command: {args.command}",
         error_type="unknown_command",

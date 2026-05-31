@@ -289,6 +289,15 @@ def normalize_message(
             "media_type": _media_kind(message),
             "reply_to_message_id": reply_to_message_id,
         }
+        # Add duration for voice/video
+        if hasattr(message, "media") and message.media:
+            doc = getattr(message.media, "document", None)
+            if doc:
+                for attr in (doc.attributes or []):
+                    dur = getattr(attr, "duration", None)
+                    if dur:
+                        result["duration"] = int(dur)
+                        break
         if action_type:
             result["action"] = action_type
         reactions = _extract_reactions(message)

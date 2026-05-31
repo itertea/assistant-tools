@@ -44,6 +44,10 @@ async def handle_client(reader: asyncio.StreamReader, writer: asyncio.StreamWrit
         if cmd == "ping":
             result = {"ok": True, "data": "pong", "version": _DAEMON_VERSION}
 
+        elif cmd == "whoami":
+            me = await client.get_me()
+            result = {"ok": True, "data": {"id": me.id, "username": me.username, "first_name": me.first_name}}
+
         elif cmd == "shutdown":
             # Graceful shutdown
             import signal
