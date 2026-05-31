@@ -183,8 +183,8 @@ async def handle_client(reader: asyncio.StreamReader, writer: asyncio.StreamWrit
                     responses.append(normalize_message(msg, chat_entity=entity))
 
             if responses:
-                # Grace period: wait 2s to collect follow-up messages
-                await asyncio.sleep(2)
+                # Grace period: wait 3s to collect follow-up messages
+                await asyncio.sleep(3)
                 messages_raw = await client.get_messages(entity, limit=50)
                 for msg in reversed(list(messages_raw or [])):
                     mid = int(getattr(msg, "id", 0) or 0)
@@ -226,8 +226,8 @@ async def handle_client(reader: asyncio.StreamReader, writer: asyncio.StreamWrit
                             responses.append(normalize_message(msg, chat_entity=entity))
                             baseline_id = max(baseline_id, mid)
                     if responses:
-                        # Grace period: wait 2s more to collect follow-up messages
-                        await asyncio.sleep(2)
+                        # Grace period: wait 3s more to collect follow-up messages
+                        await asyncio.sleep(3)
                         messages_raw = await client.get_messages(entity, limit=10)
                         for msg in reversed(list(messages_raw or [])):
                             mid = int(getattr(msg, "id", 0) or 0)
