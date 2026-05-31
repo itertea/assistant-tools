@@ -183,6 +183,16 @@ async def handle_client(reader: asyncio.StreamReader, writer: asyncio.StreamWrit
                     responses.append(normalize_message(msg, chat_entity=entity))
 
             if responses:
+                # Grace period: wait 2s to collect follow-up messages
+                await asyncio.sleep(2)
+                messages_raw = await client.get_messages(entity, limit=50)
+                for msg in reversed(list(messages_raw or [])):
+                    mid = int(getattr(msg, "id", 0) or 0)
+                    if _is_user_reply(msg, mid):
+                        if not any(r.get("message_id") == mid for r in responses):
+                            responses.append(normalize_message(msg, chat_entity=entity))
+
+            if responses:
                 # Auto-react to show user the agent read the message
                 from telethon.tl.functions.messages import SendReactionRequest
                 from telethon.tl.types import ReactionEmoji, InputPeerUser
