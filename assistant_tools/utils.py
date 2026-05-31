@@ -43,6 +43,26 @@ def ensure_path_exists(value: str) -> Path:
 
 
 def emit_result(result: CommandResult) -> None:
+    # Fields that are safe to omit when null (optional/noise fields)
+    _OMIT_WHEN_NULL = {
+        "media_type", "reply_to_message_id", "action", "error",
+        "caption", "media_group_id", "link", "media",
+        "has_protected_content", "mentioned", "outgoing",
+    }
+
+    def _strip_nulls(obj: Any) -> Any:
+        if isinstance(obj, dict):
+            return {
+                k: _strip_nulls(v)
+                for k, v in obj.items()
+                if not (v is None and k in _OMIT_WHEN_NULL)
+            }
+        if isinstance(obj, list):
+            return [_strip_nulls(i) for i in obj]
+        return obj
+
+    is_full: bool = bool((result.meta or {}).get("full"))
+
     payload: dict[str, Any] = {
         "ok": result.ok,
         "command": result.command,
@@ -51,6 +71,8 @@ def emit_result(result: CommandResult) -> None:
         "error": result.error,
         "meta": result.meta,
     }
+    if not is_full:
+        payload = _strip_nulls(payload)
     json.dump(payload, sys.stdout, ensure_ascii=False)
     sys.stdout.write("\n")
 
