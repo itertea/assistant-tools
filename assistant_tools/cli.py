@@ -872,14 +872,13 @@ def _build_daemon_request(args: Any) -> dict[str, Any] | None:
         return {"cmd": "delete", "peer": args.peer, "message_ids": args.message_ids}
     if cmd == "ask":
         import os
-        import hashlib
         session_id = os.environ.get("KIT_SESSION_ID")
         if not session_id:
             try:
                 session_id = os.ttyname(0)
             except OSError:
                 # Use hash of cwd — stable across restarts in same project
-                session_id = "s_" + hashlib.md5(os.getcwd().encode()).hexdigest()[:8]
+                session_id = "default"
         return {"cmd": "ask", "peer": args.peer, "text": args.text, "timeout": args.timeout, "parse_mode": getattr(args, "parse_mode", None), "session_id": session_id}
     if cmd == "send-file":
         return {"cmd": "send_file", "peer": args.peer, "path": str(args.path), "caption": args.caption, "reply_to": args.reply_to}
