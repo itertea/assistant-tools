@@ -240,7 +240,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
 
     tg_send_photo = tg_subparsers.add_parser(
-        "send-photo", help="Send local image(s) as Telegram photo (multiple = album)"
+        "send-photo", aliases=["send-media"], help="Send local photo/video as Telegram media (multiple = album)"
     )
     tg_send_photo.add_argument("peer", help="Target peer")
     tg_send_photo.add_argument("path", nargs="+", help="Local image path(s)")
@@ -890,7 +890,7 @@ def dispatch(
         tg_config = resolve_tg_config(config, args.profile)
 
         # Validate video files before sending (catches corrupted files early)
-        if args.tg_command in ("send-file", "send-photo"):
+        if args.tg_command in ("send-file", "send-photo", "send-media"):
             paths = [str(args.path)] if isinstance(args.path, str) else [str(p) for p in args.path] if isinstance(args.path, list) else [str(args.path)]
             for p in paths:
                 _validate_video_if_needed(p)
@@ -958,7 +958,7 @@ def dispatch(
                     tg_config, args.peer, str(args.path), args.caption, args.reply_to, args.full
                 )
             )
-        if args.tg_command == "send-photo":
+        if args.tg_command in ("send-photo", "send-media"):
             if len(args.path) == 1:
                 return tg_commands.run(
                     tg_commands.send_photo(
