@@ -28,7 +28,16 @@ _last_activity: float = 0.0
 
 # Version = hash of this file, changes on every update
 import hashlib as _hashlib
-_DAEMON_VERSION = _hashlib.md5(Path(__file__).read_bytes()).hexdigest()[:8]
+
+def _compute_version() -> str:
+    """Hash all package .py files to detect any code change."""
+    pkg_dir = Path(__file__).parent.parent
+    h = _hashlib.md5()
+    for f in sorted(pkg_dir.rglob("*.py")):
+        h.update(f.read_bytes())
+    return h.hexdigest()[:8]
+
+_DAEMON_VERSION = _compute_version()
 
 
 async def handle_client(reader: asyncio.StreamReader, writer: asyncio.StreamWriter, client: TelegramClient, config: ResolvedTgConfig) -> None:
