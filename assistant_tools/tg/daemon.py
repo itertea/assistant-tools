@@ -149,11 +149,36 @@ async def handle_client(reader: asyncio.StreamReader, writer: asyncio.StreamWrit
             peer = request["peer"]
             path = request["path"]
             entity = await _resolve_peer_entity(client, peer)
+
+            # Add silent audio to videos without sound (prevents gif conversion)
+            upload_path = path
+            tmp_path = None
+            if path.lower().endswith((".mp4", ".mkv", ".avi", ".mov", ".webm")):
+                import subprocess, tempfile
+                from imageio_ffmpeg import get_ffmpeg_exe
+                ffmpeg = get_ffmpeg_exe()
+                probe = subprocess.run([ffmpeg, "-i", path], capture_output=True, text=True, timeout=30)
+                if "Audio:" not in probe.stderr:
+                    tmp = tempfile.NamedTemporaryFile(suffix=f"_{os.path.basename(path)}", delete=False)
+                    tmp.close()
+                    r = subprocess.run(
+                        [ffmpeg, "-y", "-i", path, "-f", "lavfi", "-i", "anullsrc=r=44100:cl=mono",
+                         "-c:v", "copy", "-c:a", "aac", "-shortest", tmp.name],
+                        capture_output=True, timeout=120,
+                    )
+                    if r.returncode == 0:
+                        upload_path = tmp.name
+                        tmp_path = tmp.name
+                    else:
+                        os.unlink(tmp.name)
+
             message = await client.send_file(
-                entity, path, caption=request.get("caption"),
+                entity, upload_path, caption=request.get("caption"),
                 reply_to=request.get("reply_to"), force_document=False,
                 supports_streaming=True,
             )
+            if tmp_path:
+                os.unlink(tmp_path)
             peer_id = await _get_peer_id(client, entity)
             msg_id = int(getattr(message, "id", 0) or 0)
             if peer_id and msg_id:
@@ -410,7 +435,7 @@ async def ensure_daemon(config: ResolvedTgConfig) -> None:
         [sys.executable, "-m", "assistant_tools.tg.daemon_runner"],
         env=env,
         stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
+        stderr=open("/tmp/kit-daemon.log","a"),
         start_new_session=True,
     )
 
