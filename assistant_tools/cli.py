@@ -763,6 +763,7 @@ def _run_tg_stt(args: Any, config: AppConfig, tg_config: Any) -> CommandResult:
     import asyncio as _asyncio
     import shutil
     import tempfile
+    import subprocess
     from assistant_tools.tg import commands as _cmds
 
     # Download
@@ -773,6 +774,21 @@ def _run_tg_stt(args: Any, config: AppConfig, tg_config: Any) -> CommandResult:
     if not path:
         return CommandResult(ok=False, command="tg.stt", provider="groq", data=None,
                             error={"type": "no_media", "message": "Message has no downloadable media"}, meta={})
+
+    # Extract audio from video files (Whisper has 25MB limit)
+    video_exts = (".mp4", ".mkv", ".avi", ".mov", ".webm", ".m4v")
+    if path.lower().endswith(video_exts) or os.path.getsize(path) > 24 * 1024 * 1024:
+        from imageio_ffmpeg import get_ffmpeg_exe
+        ffmpeg = get_ffmpeg_exe()
+        audio_path = tempfile.mktemp(suffix=".ogg")
+        r = subprocess.run(
+            [ffmpeg, "-y", "-i", path, "-vn", "-c:a", "libopus", "-b:a", "48k", audio_path],
+            capture_output=True, timeout=120,
+        )
+        if r.returncode == 0:
+            path = audio_path
+        # else: try sending original, will fail with 413 if too big
+
     # Rename to .ogg for whisper compatibility
     ogg_path = path if path.endswith(".ogg") else path.rsplit(".", 1)[0] + ".ogg"
     if ogg_path != path:
