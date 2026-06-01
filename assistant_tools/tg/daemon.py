@@ -28,7 +28,16 @@ _last_activity: float = 0.0
 
 # Version = hash of this file, changes on every update
 import hashlib as _hashlib
-_DAEMON_VERSION = _hashlib.md5(Path(__file__).read_bytes()).hexdigest()[:8]
+
+def _compute_version() -> str:
+    """Hash all package .py files to detect any code change."""
+    pkg_dir = Path(__file__).parent.parent
+    h = _hashlib.md5()
+    for f in sorted(pkg_dir.rglob("*.py")):
+        h.update(f.read_bytes())
+    return h.hexdigest()[:8]
+
+_DAEMON_VERSION = _compute_version()
 
 
 async def handle_client(reader: asyncio.StreamReader, writer: asyncio.StreamWriter, client: TelegramClient, config: ResolvedTgConfig) -> None:
@@ -149,11 +158,36 @@ async def handle_client(reader: asyncio.StreamReader, writer: asyncio.StreamWrit
             peer = request["peer"]
             path = request["path"]
             entity = await _resolve_peer_entity(client, peer)
+
+            # Add silent audio to videos without sound (prevents gif conversion)
+            upload_path = path
+            tmp_path = None
+            if path.lower().endswith((".mp4", ".mkv", ".avi", ".mov", ".webm")):
+                import subprocess, tempfile
+                from imageio_ffmpeg import get_ffmpeg_exe
+                ffmpeg = get_ffmpeg_exe()
+                probe = subprocess.run([ffmpeg, "-i", path], capture_output=True, text=True, timeout=30)
+                if "Audio:" not in probe.stderr:
+                    tmp = tempfile.NamedTemporaryFile(suffix=f"_{os.path.basename(path)}", delete=False)
+                    tmp.close()
+                    r = subprocess.run(
+                        [ffmpeg, "-y", "-i", path, "-f", "lavfi", "-i", "anullsrc=r=44100:cl=mono",
+                         "-c:v", "copy", "-c:a", "aac", "-shortest", tmp.name],
+                        capture_output=True, timeout=120,
+                    )
+                    if r.returncode == 0:
+                        upload_path = tmp.name
+                        tmp_path = tmp.name
+                    else:
+                        os.unlink(tmp.name)
+
             message = await client.send_file(
-                entity, path, caption=request.get("caption"),
+                entity, upload_path, caption=request.get("caption"),
                 reply_to=request.get("reply_to"), force_document=False,
                 supports_streaming=True,
             )
+            if tmp_path:
+                os.unlink(tmp_path)
             peer_id = await _get_peer_id(client, entity)
             msg_id = int(getattr(message, "id", 0) or 0)
             if peer_id and msg_id:
@@ -205,21 +239,18 @@ async def handle_client(reader: asyncio.StreamReader, writer: asyncio.StreamWrit
                 if _is_user_reply(msg, mid):
                     responses.append(normalize_message(msg, chat_entity=entity))
 
-            # Send question if provided
-            if text:
+            # Send question ONLY if no pending messages
+            if text and not responses:
                 session_tag = session_id.replace("/dev/pts/", "pts").replace("/", "_").replace("-", "_")
                 formatted = f"❓ **#ask_{session_tag}**\n\n{text}"
-                kwargs_ask: dict[str, Any] = {"parse_mode": "md"}
+                kwargs_ask: dict[str, Any] = {}
                 sent_msg = await client.send_message(entity, formatted, **kwargs_ask)
                 msg_id = int(getattr(sent_msg, "id", 0) or 0)
                 if peer_id and msg_id:
                     record_sent(config, peer_id, msg_id)
-                    max_seen = msg_id
-                    if responses:
-                        max_seen = max(msg_id, max(r.get("message_id", 0) for r in responses))
-                    record_ask(config, peer_id, max_seen, session_id)
+                    record_ask(config, peer_id, msg_id, session_id)
             elif responses and peer_id:
-                # No text but collected responses — update baseline
+                # Have pending responses — update baseline, don't send question
                 max_seen = max(r.get("message_id", 0) for r in responses)
                 if max_seen:
                     record_ask(config, peer_id, max_seen, session_id)
@@ -253,8 +284,12 @@ async def handle_client(reader: asyncio.StreamReader, writer: asyncio.StreamWrit
                 while True:
                     if deadline is not None and time.time() >= deadline:
                         break
-                    await asyncio.sleep(1.5)
-                    messages_raw = await client.get_messages(entity, limit=10)
+                    await asyncio.sleep(3)
+                    try:
+                        messages_raw = await client.get_messages(entity, limit=10)
+                    except Exception:
+                        await asyncio.sleep(5)
+                        continue
                     for msg in reversed(list(messages_raw or [])):
                         mid = int(getattr(msg, "id", 0) or 0)
                         if _is_user_reply(msg, mid):
@@ -409,7 +444,7 @@ async def ensure_daemon(config: ResolvedTgConfig) -> None:
         [sys.executable, "-m", "assistant_tools.tg.daemon_runner"],
         env=env,
         stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
+        stderr=open("/tmp/kit-daemon.log","a"),
         start_new_session=True,
     )
 

@@ -253,13 +253,6 @@ def build_parser() -> argparse.ArgumentParser:
         "--as-gif", action="store_true", help="Send video as GIF/animation (no sound, autoplay)"
     )
 
-    tg_send_album = tg_subparsers.add_parser("send-album", help="Send multiple files as an album")
-    tg_send_album.add_argument("peer", help="Target peer")
-    tg_send_album.add_argument("paths", nargs="+", help="Local file paths")
-    tg_send_album.add_argument("--caption", default=None, help="Optional caption")
-    tg_send_album.add_argument("--reply-to", type=int, default=None, help="Reply target message id")
-    tg_send_album.add_argument("--full", action="store_true", help="Return fuller message objects")
-
     tg_send_voice = tg_subparsers.add_parser(
         "send-voice", help="Send local audio file as Telegram voice note"
     )
@@ -312,21 +305,33 @@ def build_parser() -> argparse.ArgumentParser:
     )
     tg_wait_next.add_argument("--full", action="store_true", help="Return fuller message object")
 
-    tg_ask = tg_subparsers.add_parser("ask", help="Send a question and wait for user's reply")
-    tg_ask.add_argument("peer", help="Target peer (usually 'me' for Saved Messages)")
-    tg_ask.add_argument("text", nargs="?", default=None, help="Question text (omit to just collect pending replies)")
-    tg_ask.add_argument("--timeout", type=int, default=0, help="Seconds to wait for reply (0 = infinite)")
-    tg_ask.add_argument("--parse-mode", default=None, choices=["md", "html"], help="Parse mode for question")
+    tg_media_info = tg_subparsers.add_parser("media-info", help="Show media metadata")
+    tg_media_info.add_argument("peer", help="Target peer")
+    tg_media_info.add_argument("message_id", type=int, help="Message id")
+    tg_media_info.add_argument("--full", action="store_true", help="Include full message object")
 
     tg_watch = tg_subparsers.add_parser("watch", help="Stream new messages from one or more chats")
     tg_watch.add_argument("peer", nargs="+", help="Target peer(s)")
     tg_watch.add_argument("--full", action="store_true", help="Return fuller message objects")
     tg_watch.add_argument("--include-outgoing", action="store_true", help="Include own messages")
 
+    tg_send_album = tg_subparsers.add_parser("send-album", help="Send multiple files as an album")
+    tg_send_album.add_argument("peer", help="Target peer")
+    tg_send_album.add_argument("paths", nargs="+", help="Local file paths")
+    tg_send_album.add_argument("--caption", default=None, help="Optional caption")
+    tg_send_album.add_argument("--reply-to", type=int, default=None, help="Reply target message id")
+    tg_send_album.add_argument("--full", action="store_true", help="Return fuller message objects")
+
     tg_forward = tg_subparsers.add_parser("forward", help="Forward message(s) to another chat")
     tg_forward.add_argument("from_peer", help="Source peer")
     tg_forward.add_argument("to_peer", help="Destination peer")
     tg_forward.add_argument("message_ids", nargs="+", type=int, help="Message IDs to forward")
+
+    tg_ask = tg_subparsers.add_parser("ask", help="Send a question and wait for user's reply")
+    tg_ask.add_argument("peer", help="Target peer (usually 'me' for Saved Messages)")
+    tg_ask.add_argument("text", nargs="?", default=None, help="Question text (omit to just collect pending replies)")
+    tg_ask.add_argument("--timeout", type=int, default=0, help="Seconds to wait for reply (0 = infinite)")
+    tg_ask.add_argument("--parse-mode", default=None, choices=["md", "html"], help="Parse mode for question")
 
     tg_edit = tg_subparsers.add_parser("edit", help="Edit a message sent by kit")
     tg_edit.add_argument("peer", help="Target peer")
@@ -337,11 +342,6 @@ def build_parser() -> argparse.ArgumentParser:
     tg_delete = tg_subparsers.add_parser("delete", help="Delete message(s) sent by kit")
     tg_delete.add_argument("peer", help="Target peer")
     tg_delete.add_argument("message_ids", nargs="+", type=int, help="Message IDs to delete")
-
-    tg_media_info = tg_subparsers.add_parser("media-info", help="Show media metadata")
-    tg_media_info.add_argument("peer", help="Target peer")
-    tg_media_info.add_argument("message_id", type=int, help="Message id")
-    tg_media_info.add_argument("--full", action="store_true", help="Include full message object")
 
     tg_media_download = tg_subparsers.add_parser("media-download", help="Download message media")
     tg_media_download.add_argument("peer", help="Target peer")
@@ -354,13 +354,13 @@ def build_parser() -> argparse.ArgumentParser:
     tg_copy = tg_subparsers.add_parser("copy", help="Copy message to another chat")
     tg_copy.add_argument("source_peer", help="Source peer")
     tg_copy.add_argument("message_id", type=int, help="Source message id")
-    tg_copy.add_argument("target_peer", help="Target peer")
-    tg_copy.add_argument("--full", action="store_true", help="Return fuller copied message object")
 
     tg_stt = tg_subparsers.add_parser("stt", help="Download voice/audio message and transcribe (STT)")
     tg_stt.add_argument("peer", help="Target peer")
     tg_stt.add_argument("message_id", type=int, help="Message id with voice/audio")
     tg_stt.add_argument("--language", default="", help="Language hint (e.g. ru, en)")
+    tg_copy.add_argument("target_peer", help="Target peer")
+    tg_copy.add_argument("--full", action="store_true", help="Return fuller copied message object")
 
     tg_find_dialog = tg_subparsers.add_parser(
         "find-dialog", help="Find people and chats by name (Telegram search)"
@@ -758,17 +758,6 @@ def run_tg_speak(
     )
 
 
-def _toml_value(val: str) -> str:
-    """Format value for TOML."""
-    try:
-        return str(int(val))
-    except ValueError:
-        pass
-    if val.lower() in ("true", "false"):
-        return val.lower()
-    return f'"{val}"'
-
-
 def _run_tg_stt(args: Any, config: AppConfig, tg_config: Any) -> CommandResult:
     """Download voice/audio message and transcribe."""
     import asyncio as _asyncio
@@ -828,6 +817,17 @@ def _validate_video_if_needed(path: str) -> None:
         )
 
 
+def _toml_value(val: str) -> str:
+    """Format value for TOML."""
+    try:
+        return str(int(val))
+    except ValueError:
+        pass
+    if val.lower() in ("true", "false"):
+        return val.lower()
+    return f'"{val}"'
+
+
 def _daemon_middleware(args: Any, tg_config: Any) -> CommandResult | None:
     """Middleware: if daemon can handle this command, proxy through it. Returns None to fall through."""
     import asyncio as _asyncio
@@ -859,7 +859,7 @@ def _build_daemon_request(args: Any) -> dict[str, Any] | None:
     if cmd == "history":
         return {"cmd": "history", "peer": args.peer, "limit": args.limit, "full": args.full}
     if cmd == "send":
-        return {"cmd": "send", "peer": args.peer, "text": args.text, "reply_to": args.reply_to, "parse_mode": getattr(args, "parse_mode", None)}
+        return {"cmd": "send", "peer": args.peer, "text": args.text, "reply_to": args.reply_to, "parse_mode": args.parse_mode}
     if cmd == "find-dialog":
         return {"cmd": "find_dialog", "query": args.query, "limit": args.limit}
     if cmd == "get":
@@ -871,11 +871,13 @@ def _build_daemon_request(args: Any) -> dict[str, Any] | None:
     if cmd == "delete":
         return {"cmd": "delete", "peer": args.peer, "message_ids": args.message_ids}
     if cmd == "ask":
+        import os
         session_id = os.environ.get("KIT_SESSION_ID")
         if not session_id:
             try:
                 session_id = os.ttyname(0)
             except OSError:
+                # Use hash of cwd — stable across restarts in same project
                 session_id = "default"
         return {"cmd": "ask", "peer": args.peer, "text": args.text, "timeout": args.timeout, "parse_mode": getattr(args, "parse_mode", None), "session_id": session_id}
     if cmd == "send-file":
@@ -984,6 +986,7 @@ def dispatch(
         if args.tg_command == "resolve":
             return tg_commands.run(tg_commands.resolve_peer(tg_config, args.peer))
         if args.tg_command == "find-dialog":
+            import os
             if args.embeddings or os.environ.get("DEEPINFRA_TOKEN"):
                 return tg_commands.run(
                     tg_commands.find_dialog_embeddings(
@@ -1042,12 +1045,6 @@ def dispatch(
                         force_video=not as_gif,
                     )
                 )
-        if args.tg_command == "send-album":
-            return tg_commands.run(
-                tg_commands.send_album(
-                    tg_config, args.peer, args.paths, args.caption, args.reply_to, args.full
-                )
-            )
         if args.tg_command == "send-voice":
             return tg_commands.run(
                 tg_commands.send_voice(
@@ -1056,6 +1053,24 @@ def dispatch(
             )
         if args.tg_command == "speak":
             return run_tg_speak(args, config, tg_config, verbose, config_path)
+        if args.tg_command == "send-album":
+            return tg_commands.run(
+                tg_commands.send_album(
+                    tg_config, args.peer, args.paths, args.caption, args.reply_to, args.full
+                )
+            )
+        if args.tg_command == "forward":
+            return tg_commands.run(
+                tg_commands.forward_message(tg_config, args.from_peer, args.to_peer, args.message_ids)
+            )
+        if args.tg_command == "edit":
+            return tg_commands.run(
+                tg_commands.edit_message(tg_config, args.peer, args.message_id, args.text, args.parse_mode)
+            )
+        if args.tg_command == "delete":
+            return tg_commands.run(
+                tg_commands.delete_message(tg_config, args.peer, args.message_ids)
+            )
         if args.tg_command == "react":
             return tg_commands.run(
                 tg_commands.react(tg_config, args.peer, args.message_id, args.emoji)
@@ -1082,18 +1097,6 @@ def dispatch(
                 tg_commands.media_download(
                     tg_config, args.peer, args.message_id, args.output_dir, args.full
                 )
-            )
-        if args.tg_command == "forward":
-            return tg_commands.run(
-                tg_commands.forward_message(tg_config, args.from_peer, args.to_peer, args.message_ids)
-            )
-        if args.tg_command == "edit":
-            return tg_commands.run(
-                tg_commands.edit_message(tg_config, args.peer, args.message_id, args.text, args.parse_mode)
-            )
-        if args.tg_command == "delete":
-            return tg_commands.run(
-                tg_commands.delete_message(tg_config, args.peer, args.message_ids)
             )
         if args.tg_command == "watch":
             return tg_commands.run(

@@ -32,9 +32,10 @@ from assistant_tools.tg.normalize import normalize_dialog
 from assistant_tools.tg.normalize import normalize_media
 from assistant_tools.tg.normalize import normalize_message
 from assistant_tools.tg.normalize import normalize_user
+
 from assistant_tools.providers import deepinfra as deepinfra_provider
-from assistant_tools.utils import require_env
 from assistant_tools.utils import AssistantToolsError
+from assistant_tools.utils import require_env
 
 
 def _ok(command: str, data: dict[str, Any], meta: dict[str, Any]) -> CommandResult:
