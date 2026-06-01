@@ -329,7 +329,7 @@ async def auth_logout(config: ResolvedTgConfig) -> CommandResult:
 
 async def resolve_peer(config: ResolvedTgConfig, peer: str) -> CommandResult:
     async with telegram_client(config) as client:
-        entity: Any = await _resolve_peer_entity(client, peer)
+        entity: Any = await client.get_entity(peer)
         return _ok(
             "tg.resolve",
             {"chat": normalize_chat(entity)},
