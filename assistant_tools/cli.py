@@ -872,6 +872,22 @@ def _daemon_middleware(args: Any, tg_config: Any) -> CommandResult | None:
 def _build_daemon_request(args: Any) -> dict[str, Any] | None:
     """Convert CLI args to a daemon request dict. Returns None if command not supported by daemon."""
     cmd = args.tg_command
+    if cmd == "resolve":
+        return {"cmd": "resolve", "peer": args.peer}
+    if cmd == "dialogs":
+        return {"cmd": "dialogs", "limit": args.limit, "full": args.full}
+    if cmd == "participants":
+        return {"cmd": "participants", "peer": args.peer, "limit": args.limit}
+    if cmd == "react":
+        return {"cmd": "react", "peer": args.peer, "message_id": args.message_id, "emoji": args.emoji}
+    if cmd == "search":
+        return {"cmd": "search", "peer": args.peer, "query": args.query, "limit": args.limit, "full": getattr(args, "full", False)}
+    if cmd == "wait-next":
+        return {"cmd": "wait_next", "peer": args.peer[0], "peers": args.peer, "timeout": args.timeout, "full": getattr(args, "full", False)}
+    if cmd == "media-download":
+        return {"cmd": "media_download", "peer": args.peer, "message_id": args.message_id, "output_dir": getattr(args, "output_dir", None), "full": getattr(args, "full", False)}
+    if cmd == "copy":
+        return {"cmd": "copy", "source_peer": args.source_peer, "message_id": args.message_id, "target_peer": args.target_peer, "full": getattr(args, "full", False)}
     if cmd == "history":
         return {"cmd": "history", "peer": args.peer, "limit": args.limit, "full": args.full}
     if cmd == "send":

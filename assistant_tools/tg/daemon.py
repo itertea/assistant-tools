@@ -257,6 +257,120 @@ async def handle_client(reader: asyncio.StreamReader, writer: asyncio.StreamWrit
                 record_sent(config, peer_id, msg_id)
             result = {"ok": True, "data": {"message": normalize_message(message, chat_entity=entity)}}
 
+        elif cmd == "resolve":
+            entity = await client.get_entity(request["peer"])
+            result = {"ok": True, "data": {"chat": normalize_chat(entity)}}
+
+        elif cmd == "dialogs":
+            from assistant_tools.tg.normalize import normalize_dialog
+            limit = request.get("limit", 20)
+            full = request.get("full", False)
+            items = []
+            async for dialog in client.iter_dialogs(limit=limit):
+                items.append(normalize_dialog(dialog, full=full))
+            result = {"ok": True, "data": {"items": items}}
+
+        elif cmd == "participants":
+            from assistant_tools.tg.normalize import normalize_user
+            peer = request["peer"]
+            limit = request.get("limit", 100)
+            entity = await _resolve_peer_entity(client, peer)
+            participants = await client.get_participants(entity, limit=limit)
+            items = [normalize_user(p) for p in participants]
+            result = {"ok": True, "data": {"items": items}}
+
+        elif cmd == "react":
+            from telethon.tl.functions.messages import SendReactionRequest
+            from telethon.tl.types import ReactionEmoji
+            peer = request["peer"]
+            message_id = request["message_id"]
+            emoji = request.get("emoji", "👍")
+            entity = await _resolve_peer_entity(client, peer)
+            react_peer = await client.get_input_entity(entity)
+            await client(SendReactionRequest(
+                peer=react_peer, msg_id=message_id,
+                reaction=[ReactionEmoji(emoticon=emoji)],
+            ))
+            result = {"ok": True, "data": {"reacted": True, "emoji": emoji, "message_id": message_id}}
+
+        elif cmd == "search":
+            peer = request["peer"]
+            query = request["query"]
+            limit = request.get("limit", 20)
+            full = request.get("full", False)
+            entity = await _resolve_peer_entity(client, peer)
+            messages = await client.get_messages(entity, search=query, limit=limit)
+            items = [normalize_message(m, chat_entity=entity, full=full) for m in (messages or [])]
+            result = {"ok": True, "data": {"items": items}}
+
+        elif cmd == "wait_next":
+            peer = request["peer"]
+            peers = request.get("peers", [peer] if peer else [])
+            timeout = request.get("timeout", 0)
+            full = request.get("full", False)
+            import time
+            me = await client.get_me()
+            # Resolve peers and baselines
+            peer_data = []
+            for p in peers:
+                entity = await _resolve_peer_entity(client, p)
+                is_self = (getattr(entity, "id", None) == getattr(me, "id", None))
+                latest = await client.get_messages(entity, limit=1)
+                baseline_id = int(getattr(latest[0], "id", 0)) if latest else 0
+                peer_data.append({"peer": p, "entity": entity, "is_self": is_self, "baseline_id": baseline_id})
+            deadline = (time.time() + timeout) if timeout > 0 else None
+            found = None
+            while found is None:
+                if deadline and time.time() >= deadline:
+                    break
+                for pd in peer_data:
+                    msgs = await client.get_messages(pd["entity"], limit=50)
+                    for msg in (msgs or []):
+                        mid = int(getattr(msg, "id", 0) or 0)
+                        if mid <= pd["baseline_id"]:
+                            continue
+                        if not pd["is_self"] and getattr(msg, "out", False):
+                            continue
+                        found = {"message": normalize_message(msg, chat_entity=pd["entity"], full=full)}
+                        break
+                    if found:
+                        break
+                if not found:
+                    await asyncio.sleep(1.5)
+            if found:
+                result = {"ok": True, "data": found}
+            else:
+                result = {"ok": False, "error": f"Timed out waiting for the next incoming message after {timeout} seconds"}
+
+        elif cmd == "media_download":
+            peer = request["peer"]
+            message_id = request["message_id"]
+            output_dir = request.get("output_dir") or str(config.download_dir)
+            full = request.get("full", False)
+            from pathlib import Path
+            target_dir = Path(output_dir).expanduser()
+            target_dir.mkdir(parents=True, exist_ok=True)
+            entity = await _resolve_peer_entity(client, peer)
+            message = await client.get_messages(entity, ids=message_id)
+            if not message:
+                result = {"ok": False, "error": "Message not found"}
+            elif not message.media:
+                result = {"ok": False, "error": "Message has no media"}
+            else:
+                dl_path = await client.download_media(message, file=str(target_dir) + "/")
+                result = {"ok": True, "data": {"path": dl_path, "message_id": message_id}}
+
+        elif cmd == "copy":
+            source_peer = request["source_peer"]
+            message_id = request["message_id"]
+            target_peer = request["target_peer"]
+            full = request.get("full", False)
+            source_entity = await _resolve_peer_entity(client, source_peer)
+            target_entity = await _resolve_peer_entity(client, target_peer)
+            message = await client.forward_messages(target_entity, message_id, source_entity)
+            msg = message[0] if isinstance(message, list) else message
+            result = {"ok": True, "data": {"message": normalize_message(msg, chat_entity=target_entity, full=full)}}
+
         elif cmd == "ask":
             from assistant_tools.tg.sent_db import record_ask, get_last_ask, record_sent, is_own_message
             peer = request["peer"]
