@@ -901,7 +901,9 @@ def _build_daemon_request(args: Any) -> dict[str, Any] | None:
     if cmd in ("send-photo", "send-media"):
         if hasattr(args, "path") and len(args.path) == 1:
             return {"cmd": "send_photo", "peer": args.peer, "path": str(args.path[0]), "caption": args.caption, "reply_to": args.reply_to}
-        return None  # albums fall through
+        return {"cmd": "send_album", "peer": args.peer, "paths": [str(p) for p in args.path], "caption": args.caption, "reply_to": args.reply_to}
+    if cmd == "send-album":
+        return {"cmd": "send_album", "peer": args.peer, "paths": [str(p) for p in args.paths], "caption": args.caption, "reply_to": args.reply_to}
     if cmd == "send-voice":
         return {"cmd": "send_voice", "peer": args.peer, "path": str(args.path), "caption": args.caption, "reply_to": args.reply_to}
     # Commands not yet supported by daemon — fall through to direct connection

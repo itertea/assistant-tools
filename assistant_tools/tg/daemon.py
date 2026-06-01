@@ -194,6 +194,53 @@ async def handle_client(reader: asyncio.StreamReader, writer: asyncio.StreamWrit
                 record_sent(config, peer_id, msg_id)
             result = {"ok": True, "data": {"message": normalize_message(message, chat_entity=entity)}}
 
+        elif cmd == "send_album":
+            from assistant_tools.tg.sent_db import record_sent
+            peer = request["peer"]
+            paths = request["paths"]
+            entity = await _resolve_peer_entity(client, peer)
+
+            # Add silent audio to videos without sound
+            upload_paths: list[str] = []
+            temp_files: list[str] = []
+            for p in paths:
+                if p.lower().endswith((".mp4", ".mkv", ".avi", ".mov", ".webm")):
+                    import subprocess, tempfile
+                    from imageio_ffmpeg import get_ffmpeg_exe
+                    ffmpeg = get_ffmpeg_exe()
+                    probe = subprocess.run([ffmpeg, "-i", p], capture_output=True, text=True, timeout=30)
+                    if "Audio:" not in probe.stderr:
+                        tmp = tempfile.NamedTemporaryFile(suffix=f"_{os.path.basename(p)}", delete=False)
+                        tmp.close()
+                        r = subprocess.run(
+                            [ffmpeg, "-y", "-i", p, "-f", "lavfi", "-i", "anullsrc=r=44100:cl=mono",
+                             "-c:v", "copy", "-c:a", "aac", "-shortest", tmp.name],
+                            capture_output=True, timeout=120,
+                        )
+                        if r.returncode == 0:
+                            upload_paths.append(tmp.name)
+                            temp_files.append(tmp.name)
+                        else:
+                            os.unlink(tmp.name)
+                            upload_paths.append(p)
+                        continue
+                upload_paths.append(p)
+
+            messages = await client.send_file(
+                entity, upload_paths, caption=request.get("caption"),
+                reply_to=request.get("reply_to"),
+            )
+            peer_id = await _get_peer_id(client, entity)
+            items = []
+            for msg in (messages if isinstance(messages, list) else [messages]):
+                msg_id = int(getattr(msg, "id", 0) or 0)
+                if peer_id and msg_id:
+                    record_sent(config, peer_id, msg_id)
+                items.append(normalize_message(msg, chat_entity=entity))
+            for tf in temp_files:
+                os.unlink(tf)
+            result = {"ok": True, "data": {"messages": items}}
+
         elif cmd == "send_voice":
             from assistant_tools.tg.sent_db import record_sent
             peer = request["peer"]
