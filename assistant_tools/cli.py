@@ -183,6 +183,40 @@ def build_parser() -> argparse.ArgumentParser:
     config_set.add_argument("value", help="Value to set")
     config_subparsers.add_parser("path", help="Show config file path")
 
+    skill_parser = subparsers.add_parser(
+        "skill", help="Install OpenCode skills from Telegram messages"
+    )
+    skill_parser.add_argument(
+        "--profile",
+        default=None,
+        help="Telegram profile name. Defaults to tg.default_profile",
+    )
+    skill_subparsers = skill_parser.add_subparsers(dest="skill_command")
+    skill_install = skill_subparsers.add_parser(
+        "install", help="Fetch a skill document from a Telegram message and install it"
+    )
+    skill_install.add_argument(
+        "link",
+        help="Telegram message link (t.me/c/<int>/<id> or t.me/<user>/<id>) or peer",
+    )
+    skill_install.add_argument(
+        "message_id",
+        nargs="?",
+        type=int,
+        default=None,
+        help="Message id (only when 'link' is a bare peer, not a t.me link)",
+    )
+    skill_install.add_argument(
+        "--name",
+        default=None,
+        help="Override skill name (default: derived from document/message)",
+    )
+    skill_install.add_argument(
+        "--skills-dir",
+        default=None,
+        help="Skills directory (default: ~/.config/opencode/skills)",
+    )
+
     tg_parser = subparsers.add_parser("tg", help="Telegram CLI via Telethon")
     tg_parser.add_argument(
         "--profile",
@@ -926,6 +960,180 @@ def _build_daemon_request(args: Any) -> dict[str, Any] | None:
     return None
 
 
+def _parse_tg_link(value: str) -> tuple[str, int]:
+    """Parse a Telegram message link into (peer, message_id).
+
+    Supports:
+      - https://t.me/c/<internal_id>/<msg_id>  -> peer "-100<internal_id>"
+      - https://t.me/<username>/<msg_id>       -> peer "<username>"
+    Raises AssistantToolsError on a non-link or unparseable value.
+    """
+    import re as _re
+
+    match = _re.search(
+        r"t\.me/(?:c/(?P<cid>\d+)|(?P<user>[A-Za-z0-9_]+))/(?P<msg>\d+)",
+        value,
+    )
+    if not match:
+        raise AssistantToolsError(
+            f"Not a parseable t.me message link: {value}",
+            error_type="invalid_argument",
+            exit_code=2,
+        )
+    msg_id = int(match.group("msg"))
+    cid = match.group("cid")
+    if cid is not None:
+        return f"-100{cid}", msg_id
+    return match.group("user"), msg_id
+
+
+def _slugify_skill_name(value: str) -> str:
+    """Derive a filesystem-safe skill name from arbitrary text."""
+    import re as _re
+
+    token = value.strip().splitlines()[0].strip() if value else ""
+    token = token.strip().strip("#").strip()
+    token = token.split()[0] if token.split() else token
+    slug = _re.sub(r"[^A-Za-z0-9._-]+", "-", token).strip("-._")
+    return slug
+
+
+def run_skill_install(
+    args: argparse.Namespace, config: AppConfig, config_path: Path | None
+) -> CommandResult:
+    import shutil
+    import tarfile
+    import tempfile
+    import zipfile
+
+    verbose: bool = bool(args.verbose)
+    tg_config = resolve_tg_config(config, args.profile)
+
+    link_value: str = str(args.link)
+    if args.message_id is not None:
+        peer: str = link_value
+        message_id: int = int(args.message_id)
+    else:
+        peer, message_id = _parse_tg_link(link_value)
+
+    get_result: CommandResult = tg_commands.run(
+        tg_commands.get_messages(tg_config, peer, [message_id], True)
+    )
+    items: list[dict[str, Any]] = (get_result.data or {}).get("items", []) if get_result.data else []
+    if not items:
+        raise AssistantToolsError(
+            f"No message found at {peer}/{message_id}",
+            error_type="not_found",
+            exit_code=2,
+        )
+    message: dict[str, Any] = items[0]
+    media: dict[str, Any] = message.get("media") or {}
+    doc_file_name: str | None = media.get("file_name")
+    message_text: str | None = message.get("text") or message.get("caption")
+
+    tmp_dir: Path = Path(tempfile.mkdtemp(prefix="kit-skill-"))
+    try:
+        dl_result: CommandResult = tg_commands.run(
+            tg_commands.media_download(tg_config, peer, message_id, str(tmp_dir), False)
+        )
+        downloaded_path_str: str | None = (dl_result.data or {}).get("path") if dl_result.data else None
+        if not downloaded_path_str:
+            raise AssistantToolsError(
+                "Telegram message has no downloadable document",
+                error_type="not_found",
+                exit_code=2,
+            )
+        downloaded: Path = Path(downloaded_path_str)
+        file_name: str = doc_file_name or downloaded.name
+
+        lower_name: str = file_name.lower()
+        is_zip: bool = lower_name.endswith(".zip")
+        is_tar: bool = (
+            lower_name.endswith(".tar.gz")
+            or lower_name.endswith(".tgz")
+            or lower_name.endswith(".tar")
+        )
+
+        skill_name: str
+        if args.name:
+            skill_name = _slugify_skill_name(args.name)
+        else:
+            stem: str = file_name
+            for suffix in (".tar.gz", ".tgz", ".tar", ".zip", ".md"):
+                if stem.lower().endswith(suffix):
+                    stem = stem[: -len(suffix)]
+                    break
+            if stem.upper() == "SKILL" or not stem:
+                skill_name = _slugify_skill_name(message_text or "")
+            else:
+                skill_name = _slugify_skill_name(stem)
+        if not skill_name:
+            raise AssistantToolsError(
+                "Could not determine skill name (use --name to override)",
+                error_type="invalid_argument",
+                exit_code=2,
+            )
+
+        skills_dir: Path = (
+            Path(args.skills_dir).expanduser()
+            if args.skills_dir
+            else Path("~/.config/opencode/skills").expanduser()
+        )
+        dest_dir: Path = skills_dir / skill_name
+        overwritten: bool = dest_dir.exists()
+
+        installed_files: list[str]
+        if is_zip or is_tar:
+            extract_tmp: Path = Path(tempfile.mkdtemp(prefix="kit-skill-extract-"))
+            try:
+                if is_zip:
+                    with zipfile.ZipFile(downloaded) as zf:
+                        zf.extractall(extract_tmp)
+                else:
+                    with tarfile.open(downloaded) as tf:
+                        tf.extractall(extract_tmp)
+                entries: list[Path] = [p for p in extract_tmp.iterdir() if p.name != "__MACOSX"]
+                source_root: Path = (
+                    entries[0] if len(entries) == 1 and entries[0].is_dir() else extract_tmp
+                )
+                if dest_dir.exists():
+                    shutil.rmtree(dest_dir)
+                dest_dir.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copytree(source_root, dest_dir)
+            finally:
+                shutil.rmtree(extract_tmp, ignore_errors=True)
+            installed_files = sorted(
+                str(p.relative_to(dest_dir)) for p in dest_dir.rglob("*") if p.is_file()
+            )
+        else:
+            dest_dir.mkdir(parents=True, exist_ok=True)
+            dest_file: Path = dest_dir / "SKILL.md"
+            shutil.copyfile(downloaded, dest_file)
+            installed_files = ["SKILL.md"]
+
+        return CommandResult(
+            ok=True,
+            command="skill.install",
+            provider="telethon",
+            data={
+                "skill_name": skill_name,
+                "path": str(dest_dir),
+                "installed_files": installed_files,
+                "source_file_name": file_name,
+            },
+            error=None,
+            meta={
+                **_meta("skill.install", config, config_path, verbose),
+                "peer": peer,
+                "message_id": message_id,
+                "overwritten": overwritten,
+                "archive": is_zip or is_tar,
+            },
+        )
+    finally:
+        shutil.rmtree(tmp_dir, ignore_errors=True)
+
+
 def dispatch(
     args: argparse.Namespace, config: AppConfig, config_path: Path | None
 ) -> CommandResult:
@@ -942,6 +1150,14 @@ def dispatch(
         return run_video(args, config, verbose, config_path)
     if args.command == "tts":
         return run_tts(args, config, verbose, config_path)
+    if args.command == "skill":
+        if getattr(args, "skill_command", None) == "install":
+            return run_skill_install(args, config, config_path)
+        raise AssistantToolsError(
+            "Usage: kit skill install <t.me-link>",
+            error_type="invalid_argument",
+            exit_code=2,
+        )
     if args.command == "config":
         from assistant_tools.config import DEFAULT_CONFIG_PATH
         config_path_resolved = (config_path or DEFAULT_CONFIG_PATH).expanduser()
